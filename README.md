@@ -12,3 +12,5 @@ Meeting Queue Manager - Ps & Qs
 - Estimated wait-time on meeting, 
 - “possible notification”  - email/text if you can implement
 - so if person has made a meeting and certain keywords are used again in the title, prevent and tell them you already have an incoming meeting with the same or similar topic which you can discuss there
+
+Barebones test
