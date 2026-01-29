@@ -27,7 +27,9 @@ Meeting Queue Manager - Ps & Qs
 
 
 ### Elaboration on how Student list will work
-    - Create a list for students to be put in and displayed
-    - Formatting
-    - Once signed-up with ID, student will show up as a list.
-
+    - Create an empty list for students to be put in and displayed
+    - Formatting vetically (temp)
+    - Once signed-up with ID, student will be added to the list of student (increment per sign up made)
+    - Restrictions are set up by ID's, Let's say number has been assigned to student specifically, that's their ID.
+    - Student will be assigned an ID and will have a placeholder already. Once signed up, they will be added to the student list for view.
+    - the reason why they have a placeholder, is because prof will know who is in their classes right now.
