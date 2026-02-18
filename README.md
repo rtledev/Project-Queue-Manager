@@ -72,10 +72,11 @@ Meeting Queue Manager - Ps & Qs
 
 
     - Create a ID Requirement for students, wrong ID will not allow to create an appointment
-    -
+    
     
 ### For the Waitlist -> PrioQueue
-    - Warning that you might not make it within Office Hours as it is a walk-in and not appointment. So no guarantee but keep your eyes peeled on the Wait-List-Queue
+    - Warning that you might not make it within Office Hours as it is a walk-in and not appointment. So no guarantee but keep your eyes peeled on the Wait-List-Queue. Assuming each walk-in appointment is roughly 40min, if there's too many ppl prompt it.
+    
 
 
 ### Goals to acoomplish:
