@@ -98,3 +98,22 @@ DSL - Damn, Sucks, Loser
 
 
 
+# Potential implementations
+## PWA - Progressive Web App/Application
+-  Website built with web technologies (HTML, CSS, JavaScriot) that functions like a native app, offering installability, offline functionality via service worker, push notifications, and fast performance.
+
+### Google provies a Workbox:
+- A libary to simply service worker creation and caching
+- Service Worker: JavaScript file that enables features like offline capabillities, push notifications, and caching.
+
+### PWA's are built off (Javascript, CSS, HTML)
+- Javascript: offline functionality support via service workers, dynamic content updates, and API interactions.
+- CSS: providing styling, layout, and responsive design that gives PWA the app-like look.
+- PWAs rely on progressive enhancement, starting with a basic HTML structure, enhancing the user experience with CSS, and adding advanced, app-like functionality with JavaScript and modern browser APIs. You cannot build a fully functional PWA with only one of them; they are complementary technologies.
+
+# Tools used:
+- Python used for the queue-management, priority queue, and I/O functionality of list
+- SQL used for Student names, Student info such as CWID, and comments from professors, Meeting Date & Time
+- React(JavaScript) - API Implementation, Manifest File, and functionality
+- React(CSS) - Styling/Layout Look
+- React(HMTL) - Structure of the Website, Functionality, Connected it to React/Python? IDK yet.
