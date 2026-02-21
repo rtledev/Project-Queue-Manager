@@ -1,1 +1,37 @@
+from datetime import datetime   #imports datatime to generate timestamps
+
+# Create an empty list to store students
+waitlist = []
+
+print("Priority Queue Waitlist System (COnsole Mockup)")
+print("Type a student name to add them to the waitlist.")
+print("Type 'quit' to stop.\n")
+
+while True:
+    # Get User Input
+    name = input("Enter Student Name: ")
+
+    # Exit Condition
+    if name.lower() == "quit":
+        break
+
+    # time stats/ timestamp from waitlist added.
+    timestamp = datetime.now()
+
+    student = {
+        "name": name,
+        "timestamp": timestamp
+    }
+
+    # Append Student to the waitist.
+    waitlist.append(student)
+
+    # Display confirmation
+    print(f"{student.name} added at {timestamp.strftime('%H:%M:%S')}")
+    print(f"Current position in the Queue: {len(waitlist)}\n")
+
+    # Final Wailist (Consolde)
+    print("Waitlist\n")
+
+
 
