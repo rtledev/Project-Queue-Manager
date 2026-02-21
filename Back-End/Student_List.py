@@ -18,6 +18,9 @@ while True:
     # time stats/ timestamp from waitlist added.
     timestamp = datetime.now()
 
+    formatted_time = timestamp.strftime('%H:%M:%S')
+
+
     student = {
         "name": name,
         "timestamp": timestamp
@@ -27,11 +30,14 @@ while True:
     waitlist.append(student)
 
     # Display confirmation
-    print(f"{student.name} added at {timestamp.strftime('%H:%M:%S')}")
+    print(f"{student['name']} added at {timestamp.strftime('%H:%M:%S')}")
     print(f"Current position in the Queue: {len(waitlist)}\n")
 
     # Final Wailist (Consolde)
-    print("Waitlist\n")
+    print("\n Final Waitlist: \n")
+    for index, student in enumerate(waitlist, start=1):
+        print(f"{index}. {student['name']} - {student['timestamp'].strftime('%H:%M:%S')}")
 
+print("\nSuccessfully exited the waitlist system. Goodbye!")
 
 
