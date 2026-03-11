@@ -9,6 +9,17 @@ Implements a two-tier priority queue system:
 Within each tier: First-Come, First-Serve (FCFS)
 
 No database. No GUI. Pure logic engine.
+This file manages the in-memory queue logic only.
+It does NOT store student records permanently.
+It does NOT handle SQL directly.
+It is responsible for:
+    - enqueueing students into the correct queue
+    - prioritizing DSL students
+    - preserving FCFS order within each tier
+    - tracking active requests
+    - cancelling requests
+    - reporting queue positions
+    as of 2026-03-11, this is the core logic engine that will be used by the CLI and GUI interfaces.
 """
 
 #imports 
@@ -82,11 +93,8 @@ class MeetingRequest:
 
     request_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     # Automatically generates a unique ID string when created.
-    @property
-    # Returns a formatted time (HH:MM:SS) for display purposes.
-    # This is computed dynamically and always accurate (I hope).
-    def formatted_time(self) -> str:
-        return self.creation_time.strftime('%H:%M:%S')
+
+    creation_time: datetime = field(default_factory=datetime.now)
     #creation_time: datetime = field(default_factory= datetime.now)
     #Timestamp of when a request was created.
 
@@ -100,8 +108,31 @@ class MeetingRequest:
     notes: str = ""
     # For Professors and TA's to add custom notes.
 
+    @property
+    # Returns a formatted time (HH:MM:SS) for display purposes.
+    # This is computed dynamically and always accurate (I hope).
+    def formatted_time(self) -> str:
+        """
+        Returns a formatted time string (HH:MM:SS) for when the request was created.
+        Useful for display purposes in the UI and CLI.
+        """
+        return self.creation_time.strftime('%H:%M:%S')
+
 class MeetingQueueManager:
     """
+    Manages a two-tier meeting queue:
+        1. DSL queue
+        2. Non-DSL queue
+
+    Rules:
+        - DSL students are always served before non-DSL students
+        - FCFS is preserved within each tier
+
+    Internal design:
+        - Queues only store request IDs
+        - Full MeetingRequest objects are stored in a dictionary
+        - Active student tracking prevents duplicate active requests
+
     Two-tier FCFS queue:
         - DSL queue served first
         - Non-DSL queue served second
@@ -123,15 +154,26 @@ class MeetingQueueManager:
         # GLobal counter for join order (used for later merging)
         self._join_counter: int = 0
 
-    # Helper Methods (Internal Use Only)
+# ------------------------------------------------------
+# Internal Helper Methods (Internal Use Only)
+# ------------------------------------------------------
+
     def _tier(self, req: MeetingRequest) -> Deque[str]:
-        """Helper method to determine the tier of a request."""
+        """
+        Helper method to determine the tier of a request.
+        Returns the correct deque for the given request.
+
+        DSL students go to the DSL queue.
+        Non-DSL students go to the non-DSL queue.
+        """
         return self._dsl_queue if req.is_dsl_queue else self._non_dsl_queue
         
     def _remove_from_queue(self, dq: Deque[str], request_id: str) -> bool:
         """
-        Helper method to remove a request ID from a given deque.
-        Returns True if removed, False if not found.
+        Helper method to safely remove a request ID from a given deque.
+        Returns:
+            True  -> if the request ID was found and removed
+            False -> if the request ID was not found
         """
         try:
             dq.remove(request_id)
@@ -139,60 +181,86 @@ class MeetingQueueManager:
         except ValueError:
             return False
 
-#------------------------------------- Data Model ------------------------------------- #
+#------------------------------------- Data Model & Core Queue Operations ------------------------------------- #
     def enqueue(self, req: MeetingRequest) -> str:
         """
-        Add a new request into:
-        - the correct tier queue (DSL vs Non-DSL)
-        - the merged queue (arrival order)
+        Adds a new request to the queue.
+        Steps:
+            1. Reject duplicate active student requests
+            2. Assign a join sequence number
+            3. Store request in lookup tables
+            4. Append request ID to the correct queue
+
+        Returns:
+            The generated request_id
         """
         # Check if student already has an active request
         # 1. Prevent duplicate active requests
         if req.student_id in self._active_requests_by_student:
             raise AlreadyWaitingError(f"Student '{req.student_id}' already has an active request.")
         
-        # 2. Assign join sequence number (FCFS tracking)
+        # 2. Increment the global join counter and assign join sequence number (FCFS tracking)
         self._join_counter += 1
         req.join_seq = self._join_counter
 
-        # 3. Store request data
+        # 3. Store the full request object in the main lookup dictionary.
         self.requests_by_id[req.request_id] = req
+        # Track this student as having an active request (for duplicate prevention and cancellation)
         self._active_requests_by_student[req.student_id] = req.request_id
 
-        # 4. Add to correct tier queue
+        # 4. Add to correct tier queue, putting the request ID (not the full object) in the queue for memory efficiency.
         queue = self._tier(req)
         queue.append(req.request_id)
         
+        # returns the unique request ID generated for this request, which can be used for tracking and reference in the future.
         return req.request_id
 
     def peek_next(self) -> Optional[MeetingRequest]:
         """
         View the next request to be served without removing it from the queue.
         Returns None if no requests are waiting.
+        Priority rule:
+            - If DSL queue has students, return the first DSL request
+            - Otherwise return the first non-DSL request
+            - If both are empty, return None
         """
+        # DSL queue always has priority.
         if self._dsl_queue:
             return self.requests_by_id[self._dsl_queue[0]] 
+        # If no DSL requests, check non-DSL queue.
         elif self._non_dsl_queue:
             return self.requests_by_id[self._non_dsl_queue[0]]
+        # No students are waiting in either queue.
         else:
             return None
 
     def dequeue_next(self) -> Optional[MeetingRequest]:
         """
         Remove and return the next request to be served.
-        Returns None if no requests are waiting.
+        Priority rule:
+            - Serve DSL first if available
+            - Otherwise serve non-DSL
+
+        Returns:
+            The completed MeetingRequest, or None if queue is empty
         """
+        # Remove from DSL first if available.
         if self._dsl_queue:
             request_id = self._dsl_queue.popleft()
+        # Otherwise remove from the non-DSL queue.
         elif self._non_dsl_queue:
             request_id = self._non_dsl_queue.popleft()
+        # If both queues are empty, there is nothing to serve.
         else:
             return None
 
+        # Look up the full request object.
         req = self.requests_by_id[request_id]
         req.status = "Completed" # Update status to Completed
         self._active_requests_by_student.pop(req.student_id, None) # Remove from active tracking
         
+        # We intentionally keep the request in requests_by_id for history/debugging.
+        # It is no longer active because it is not in either queue and not in active tracker.
         return req
 
     def cancel_by_student(self, student_id: str) -> bool:
@@ -214,43 +282,77 @@ class MeetingQueueManager:
         
         # Step 3: Remove from the correct tier queue
         queue = self._tier(req)
+        # Remove the request ID from its queue.
         removed = self._remove_from_queue(queue, request_id)
         if not removed:
             return False
         
+        # Mark the request as cancelled.
+        req.status = "Cancelled"
+
+        # Remove the student from active request tracking.
+        self._active_requests_by_student.pop(student_id, None)
+
+        # We intentionally keep the cancelled request in requests_by_id for history/debugging.
+        return True
+        '''
+        This was before return true after 
+        if not removed:
+            return False
         # Step 4: Remove the lookup tables / active tracking
         self.requests_by_id.pop(request_id, None)
         self._active_requests_by_student.pop(student_id, None)
 
         # Step 5: Updating le status zu Cancelled
         req.status = "Cancelled"
-        
-        return True
+        '''
     
-    #------------------------------------- Utility Methods ------------------------------------- #
+    #------------------------------------- Utility Methods & Reporing Methods ------------------------------------- #
 
     def get_position(self, student_id: str) -> Optional[int]:
         """
         Get the current position of a student's request in the merged queue.
         (Dsl students are ahead of non-DSL, but FCFS is preserved within each tier)
-        Returns none if the student has no active request.
+        Position starts at 1.
+
+        Returns:
+            int position if active and waiting
+            None if student is not currently waiting a.k.a no active request found for this student.
         """
-        # Step 1: Get the student's active request
+
+        # Step 1: Get the student's active request ID (if any)
         request_id = self._active_requests_by_student.get(student_id)
         if not request_id:
             return None # No active request for this student
 
-        # Step 2: Get the merged queue
+        # Step 2: Build the merged queue 
         merged = self.merged_queue()
 
         # Step 3: Find the position of the student's request in the merged queue
         for index, req in enumerate(merged, start=1): # Start counting positions from 1
             if req.request_id == request_id:
                 return index
+            
+        # If not found, return None as a safety fallback
         return None # Should never happen if data is consistent, but return None if not found
 
     def merged_queue(self) -> List[MeetingRequest]:
-        """Shows Professors and TA's the merged queue in FCFS order (DSL first, then Non-DSL)"""
+        """
+        Returns the visible queue in current service order.
+
+        Current behavior:
+            - all waiting DSL students first
+            - then all waiting non-DSL students
+
+        Note:
+            This is NOT yet a true global FCFS merge across both tiers.
+            It is a tiered view with FCFS preserved within each tier.
+            also what tiered view is basically an arranged list of all waiting requests with DSL students listed first 
+            (in their FCFS order) followed by non-DSL students (in their FCFS order).
+            MUHAHAHA anyways
+        """
+
+         # Output list to build the merged queue view.
         out: List[MeetingRequest] = []
         # Add DSL requests first
         for request_id in self._dsl_queue:
@@ -264,3 +366,21 @@ class MeetingQueueManager:
                 out.append(req)
 
         return out
+    
+    def has_active_request(self, student_id: str) -> bool:
+        """
+        Check if a student currently has an active request in the queue.
+        Returns True if they have an active request, False otherwise.
+        """
+        return student_id in self._active_requests_by_student
+    
+    def queue_counts(self) -> Dict[str, int]:
+        """
+        Returns a dictionary with the counts of waiting requests in each queue.
+        Example output: {'DSL': 3, 'Non-DSL': 5}
+        """
+        return {
+            'DSL': len(self._dsl_queue),
+            'Non-DSL': len(self._non_dsl_queue),
+            'Total': len(self._dsl_queue) + len(self._non_dsl_queue)
+        }
