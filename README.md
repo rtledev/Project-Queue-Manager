@@ -123,15 +123,15 @@ DSL - Damn, Sucks, Loser
 
 =============================================================================================
 
-Student (Terminal Input)
-        ↓
-join_queue_cli.py
-        ↓
-student_db.py (SQL Database)
-        ↓
-Priority_Queue.py (Queue Engine)
-        ↓
-Queue Output / Queue Position
+- Student (Terminal Input)
+-         ↓
+- join_queue_cli.py
+-         ↓
+- student_db.py (SQL Database)
+-         ↓
+- Priority_Queue.py (Queue Engine)
+-         ↓
+- Queue Output / Queue Position
 
 student_db.py
 → stores and validates student CWIDs
@@ -146,12 +146,12 @@ Priority_Queue.py
 
 Students Table
 ---------------------------------
-CWID (Primary Key)
-FirstName
-MiddleInitial (if applicable)
-LastName
-SchoolEmail
-ContactEmail
-PhoneNumber (optional)
-DSLStatus
+- CWID (Primary Key)
+- FirstName
+- MiddleInitial (if applicable)
+- LastName
+- SchoolEmail
+- ContactEmail
+- PhoneNumber (optional)
+- DSLStatus
 
