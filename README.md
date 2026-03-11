@@ -117,3 +117,41 @@ DSL - Damn, Sucks, Loser
 - React(JavaScript) - API Implementation, Manifest File, and functionality
 - React(CSS) - Styling/Layout Look
 - React(HMTL) - Structure of the Website, Functionality, Connected it to React/Python? IDK yet.
+
+
+
+
+=============================================================================================
+
+Student (Terminal Input)
+        ↓
+join_queue_cli.py
+        ↓
+student_db.py (SQL Database)
+        ↓
+Priority_Queue.py (Queue Engine)
+        ↓
+Queue Output / Queue Position
+
+student_db.py
+→ stores and validates student CWIDs
+
+join_queue_cli.py
+→ handles user input and validation
+
+Priority_Queue.py
+→ manages queue logic
+
+
+
+Students Table
+---------------------------------
+CWID (Primary Key)
+FirstName
+MiddleInitial (if applicable)
+LastName
+SchoolEmail
+ContactEmail
+PhoneNumber (optional)
+DSLStatus
+
