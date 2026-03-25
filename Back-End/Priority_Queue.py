@@ -199,6 +199,7 @@ class MeetingQueueManager:
         """
         # Check if student already has an active request
         # 1. Prevent duplicate active requests
+        req.student_id = str(req.student_id)
         if req.student_id in self._active_requests_by_student:
             raise AlreadyWaitingError(f"Student '{req.student_id}' already has an active request.")
         
