@@ -272,7 +272,7 @@ def returning_student_flow(student: dict) -> bool:
     # Prompt for school email and verify it matches the database record.
     entered_email = prompt_email("Enter your school email for verification: ")
 
-    if school_email_matches_cwid(student["cwid"], entered_email):
+    if school_email_matches_cwid(entered_email, student["cwid"] ):
         print("Email verified successfully.")
         return True
     else:
@@ -350,7 +350,7 @@ def join_queue_flow(qm: MeetingQueueManager) -> None:
     )
 
     try:
-        qm.add_request(request)
+        qm.enqueue(request)
         print(f"\nSuccessfully added to the queue! Your current position will be shown in the next queue view.")
     except AlreadyWaitingError:
         print("\nYou are already in the queue. Please wait for your turn or contact support if you need assistance.")
@@ -375,7 +375,7 @@ def serve_next_flow(qm: MeetingQueueManager) -> None:
     same CLI as joining the queue.
     """
     print("\nServing the next student in the queue...")
-    next_request = qm.serve_next()
+    next_request = qm.dequeue_next()
 
     if next_request is None:
         print("No students are currently waiting.")
@@ -442,7 +442,8 @@ def main() -> None:
             next_req = qm.peek_next()
             if next_req:
                 print(f"\nNext student in line: {next_req.student_name} (CWID: {next_req.student_id}) - Topic: {next_req.title}")
-                print(f"Tier: {next_req.tier}")
+                tier = "DSL" if next_req.is_dsl_queue else "Non-DSL"
+                print(f"Tier: {tier}")
                 print(f"Joined at: {next_req.formatted_time}")
             else:
                 print("\nNo students are currently waiting.")
@@ -456,9 +457,9 @@ def main() -> None:
         elif choice == "6":
             counts = qm.queue_counts()
             print(f"\nCurrent queue counts:")
-            print(f"DSL Queue: {counts['dsl']}")
-            print(f"Non-DSL Queue: {counts['non_dsl']}")
-            print(f"Total: {counts['total']}")
+            print(f"DSL Queue: {counts['DSL']}")
+            print(f"Non-DSL Queue: {counts['Non_DSL']}")
+            print(f"Total: {counts['Total']}")
 
         elif choice == "7":
             print("Exiting the queue system. Goodbye!")

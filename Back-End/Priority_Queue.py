@@ -98,6 +98,9 @@ class MeetingRequest:
     #creation_time: datetime = field(default_factory= datetime.now)
     #Timestamp of when a request was created.
 
+    near_front_notified: bool = False
+    # Tracks whether the student already received a "near the front" email.
+
     # Sequence number for FCFS ordering across both queues
     # (Engine will assign this when equeue is called)
     join_seq: int = 0
@@ -384,3 +387,43 @@ class MeetingQueueManager:
             'Non-DSL': len(self._non_dsl_queue),
             'Total': len(self._dsl_queue) + len(self._non_dsl_queue)
         }
+
+    def load_waiting_requests(self, requests: List[MeetingRequest]) -> None:
+        """
+        Loads already- existing waiting requests into memory.
+
+        This is used when the program starts and we want to rebuild
+        the queue from the databse instead of starting empty.
+
+        Requests should already have:
+        - request_id
+        - join-seq
+        - status
+        - creation_time
+        """
+
+        # Clear current in-memory state first.
+        self._dsl_queue.clear()
+        self._non_dsl_queue.clear()
+        self.requests_by_id.clear()
+        self._active_requests_by_student.clear()
+        self._join_counter.clear()
+
+        # Load requests in gloabal join order so FCFS is preserved.
+        for req in sorted(requests, key=lambda r: r.join_seq):
+            if req.status != "Waiting":
+                continue
+
+            # Store the full request object.
+            self.requests_by_id[req.request_id] = req
+
+            #Track active request by student.
+            self._active_requests_by_student[str(req.student_id)] = req.student_id
+
+            # Append request ID to the correct queue.
+            queue = self.tier(req)
+            queue.append(req.request_id)
+
+            # Keep join counter in sync with the highest known join_seq.
+            if req.join_seq > self._join_counter:
+                self._join_counter = req.join_seq
