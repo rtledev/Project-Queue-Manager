@@ -1,3 +1,4 @@
+# FIRST DRAFT OF OUR WAITLIST HAHAHA
 from datetime import datetime   #imports datatime to generate timestamps
 
 # Create an empty list to store students

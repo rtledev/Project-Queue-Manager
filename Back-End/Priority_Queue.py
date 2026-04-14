@@ -205,6 +205,49 @@ class MeetingQueueManager:
         except ValueError:
             return False
 
+    def load_waiting_requests(self, requests: List[MeetingRequest]) -> None:
+        """
+        Loads already- existing waiting requests into memory.
+
+        This is used when the program starts and we want to rebuild
+        the queue from the databse instead of starting empty.
+
+        Requests should already have:
+        - request_id
+        - join-seq
+        - status
+        - creation_time
+        """
+
+        # Clear current in-memory state first.
+        self._dsl_queue.clear()
+        self._non_dsl_queue.clear()
+        self.requests_by_id.clear()
+        self._active_requests_by_student.clear()
+        self._join_counter = 0
+
+        # Load requests in gloabal join order so FCFS is preserved.
+        for req in sorted(requests, key=lambda r: r.join_seq):
+            if req.status != "Waiting":
+                continue
+
+            # Keep queue-side student_id consistently as a string.
+            req.student_id = str(req.student_id)
+
+            # Store the full request object.
+            self.requests_by_id[req.request_id] = req
+
+            #Track active request by student.
+            self._active_requests_by_student[str(req.student_id)] = req.student_id
+
+            # Append the request ID to the correct queue based on its tier.
+            self._tier(req).append(req.request_id)
+
+            # Keep join counter in sync with the highest known join_seq.
+            if req.join_seq > self._join_counter:
+                self._join_counter = req.join_seq
+
+
 #------------------------------------- Data Model & Core Queue Operations ------------------------------------- #
     def enqueue(self, req: MeetingRequest) -> str:
         """
@@ -282,6 +325,7 @@ class MeetingQueueManager:
         # Look up the full request object.
         req = self.requests_by_id[request_id]
         req.status = "Completed" # Update status to Completed
+        req.served_at = datetime.now() # Set the served_at timestamp to now
         self._active_requests_by_student.pop(req.student_id, None) # Remove from active tracking
         
         # We intentionally keep the request in requests_by_id for history/debugging.
@@ -314,7 +358,7 @@ class MeetingQueueManager:
         
         # Mark the request as cancelled.
         req.status = "Cancelled"
-
+        req.served_at = datetime.now() # Set the cancelled_at timestamp to now
         # Remove the student from active request tracking.
         self._active_requests_by_student.pop(student_id, None)
 
@@ -410,42 +454,12 @@ class MeetingQueueManager:
             'Total': len(self._dsl_queue) + len(self._non_dsl_queue)
         }
 
-    def load_waiting_requests(self, requests: List[MeetingRequest]) -> None:
+    def get_active_request_by_student(self, student_id: str) -> Optional[MeetingRequest]:
         """
-        Loads already- existing waiting requests into memory.
-
-        This is used when the program starts and we want to rebuild
-        the queue from the databse instead of starting empty.
-
-        Requests should already have:
-        - request_id
-        - join-seq
-        - status
-        - creation_time
+        Return the active waiting request object for a student if one exists.
         """
-
-        # Clear current in-memory state first.
-        self._dsl_queue.clear()
-        self._non_dsl_queue.clear()
-        self.requests_by_id.clear()
-        self._active_requests_by_student.clear()
-        self._join_counter.clear()
-
-        # Load requests in gloabal join order so FCFS is preserved.
-        for req in sorted(requests, key=lambda r: r.join_seq):
-            if req.status != "Waiting":
-                continue
-
-            # Store the full request object.
-            self.requests_by_id[req.request_id] = req
-
-            #Track active request by student.
-            self._active_requests_by_student[str(req.student_id)] = req.student_id
-
-            # Append request ID to the correct queue.
-            queue = self.tier(req)
-            queue.append(req.request_id)
-
-            # Keep join counter in sync with the highest known join_seq.
-            if req.join_seq > self._join_counter:
-                self._join_counter = req.join_seq
+        student_id = str(student_id)
+        request_id = self._active_requests_by_student.get(student_id)
+        if request_id is None:
+            return None
+        return self.requests_by_id.get(request_id)
