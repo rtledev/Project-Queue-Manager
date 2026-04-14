@@ -16,6 +16,15 @@ Flow:
     6. Create a MeetingRequest
     7. Add the request to the queue
     8. Show queue position
+
+- Loads SMTP values from .env through notification_service.py
+- Supports multiple queues / professors
+- Supports active office-hours sessions
+- Uses one PersistentMeetingQueueManager per queue/session
+- Adds persistent professor notes
+- Adds queue reset per session
+- Queues join/near-front/now-serving/reminder emails
+- Starts a background email worker
 """
 # loads environment variables form .env into the preocss environment during local development.
 # from dotenv import load_dotenv
@@ -23,16 +32,33 @@ Flow:
 # after this runs, os.getenv("SMTP_HOST"), etc. can read values from .env
 # load_dotenv()
 
+from datetime import datetime, timedelta
+from typing import Optional, Tuple
+
 # Import the queue engine pieces.
 from Priority_Queue import MeetingQueueManager, MeetingRequest, AlreadyWaitingError
+from persistent_queue_manager import PersistMeetingQueueManager
 
 # Import database helper functions.
 from student_db import (
+    create_students_table,
     cwid_exists,
     get_student_by_cwid,
     profile_is_complete,
     school_email_matches_cwid,
     update_student_info,
+)
+from queue_db import (
+    initialize_queue_storage,
+    seed_default_queues_if_empty,
+    list_active_queues,
+    get_active_session_for_queue,
+    create_session,
+    end_session,
+)
+from notification_service import (
+    EmailNotifier,
+    start_email_worker,
 )
 
 
@@ -122,7 +148,7 @@ def prompt_email(prompt_text: str) -> str:
     Repeatedly prompts until a valid-looking email is entered.
     """
     while True:
-        email = input(prompt_text).strip()
+        email = input(prompt_text).strip().lower()
         if is_valid_email(email):
             return email
         print("Invalid email format. Please include '@' and '.'")
@@ -176,32 +202,69 @@ def build_full_name(first_name: str, middle_initial: str, last_name: str) -> str
         return f"{first_name} {middle_initial} {last_name}"
     return f"{first_name} {last_name}"
 
+# -------------------------------------------------------------------
+# Queue/session selection helpers
+# -------------------------------------------------------------------
 
-def print_queue_view(qm: MeetingQueueManager) -> None:
+def select_active_queue() -> Optional[dict]:
     """
-    Displays the current merged queue in a readable terminal format.
+    Displays all active queues and lets the user choose one.
+
+    Returns:
+        queue dictionary if selected
+        None if the user cancels or no queues exist
     """
-    merged = qm.merged_queue()
+    queues = list_active_queues()
 
-    print("\nCurrent Queue View:")
-    print("-" * 70)
+    if not queues:
+        print("No active queues are available.")
+        return None
 
-    if not merged:
-        print("No students are currently waiting.")
-        return
-
-    for index, req in enumerate(merged, start=1):
-        tier = "DSL" if req.is_dsl_queue else "Non-DSL"
+    print("\nAvailable Queues:")
+    for index, q in enumerate(queues, start=1):
         print(
-            f"{index}. "
-            f"{req.student_name} | "
-            f"CWID: {req.student_id} | "
-            f"{tier} | "
-            f"Topic: {req.title} | "
-            f"Joined: {req.formatted_time}"
+            f"{index}. {q['queue_name']} | "
+            f"{q['professor_name']} | "
+            f"{q['location']}"
         )
 
-    print("-" * 70)
+    while True:
+        choice = input("Choose a queue number (or press Enter to cancel): ").strip()
+
+        if choice == "":
+            return None
+
+        try:
+            index = int(choice)
+            if 1 <= index <= len(queues):
+                return queues[index - 1]
+        except ValueError:
+            pass
+
+        print("Invalid choice. Please try again.")
+
+
+def get_manager_for_active_session(queue_id: int) -> Optional[Tuple[dict, PersistMeetingQueueManager]]:
+    """
+    Gets the active session for the selected queue and returns:
+
+        (session_dict, queue_manager)
+
+    Why this exists:
+    - each queue can have its own active office-hours session
+    - each queue/session pair gets its own persistent queue manager
+    """
+    session = get_active_session_for_queue(queue_id)
+    if session is None:
+        return None
+
+    manager = PersistMeetingQueueManager(queue_id=queue_id, session_id=session["session_id"])
+    return session, manager
+
+
+# -------------------------------------------------------------------
+# Student profile flows
+# -------------------------------------------------------------------
 
 
 def first_time_setup(cwid: int) -> dict:
@@ -275,7 +338,7 @@ def returning_student_flow(student: dict) -> bool:
     print("\nWelcome back! Please verify your identity.")
 
     # Prompt for school email and verify it matches the database record.
-    entered_email = prompt_email("Enter your school email for verification: ").lower()
+    entered_email = prompt_email("Enter your school email for verification: ")
 
     if school_email_matches_cwid(entered_email, student["cwid"] ):
         print("Email verified successfully.")
@@ -283,14 +346,89 @@ def returning_student_flow(student: dict) -> bool:
     else:
         print("Email verification failed. The entered email does not match our records.")
         return False
-    
-def join_queue_flow(qm: MeetingQueueManager) -> None:
+
+# -------------------------------------------------------------------
+# Queue display helpers
+# -------------------------------------------------------------------
+
+def print_queue_view(qm: MeetingQueueManager) -> None:
+    """
+    Displays the current merged queue in a readable terminal format.
+    """
+    merged = qm.merged_queue()
+
+    print("\nCurrent Queue View:")
+    print("-" * 70)
+
+    if not merged:
+        print("No students are currently waiting.")
+        print("-" * 70)
+        return
+
+    for index, req in enumerate(merged, start=1):
+        tier = "DSL" if req.is_dsl_queue else "Non-DSL"
+        print(
+            f"{index}. "
+            f"{req.student_name} | "
+            f"CWID: {req.student_id} | "
+            f"{tier} | "
+            f"Topic: {req.title} | "
+            f"Joined: {req.formatted_time}"
+        )
+
+    print("-" * 70)
+
+def notify_students_near_front(qm: PersistMeetingQueueManager, notifier: EmailNotifier, threshold: int = 2) -> None:
+    """
+    Queues one-time near-front emails for students near the front.
+
+    Students are notified only if:
+    - they are within the threshold
+    - they opted into notifications
+    - they have not already been notified
+    """
+    merged = qm.merged_queue()
+
+    for position, req in enumerate(merged, start=1):
+        if position > threshold:
+            continue
+        if not req.notification_ok:
+            continue
+        if req.near_front_notified:
+            continue
+
+        notifier.queue_near_front_notification(req, position)
+
+
+# -------------------------------------------------------------------
+# Student queue actions
+# -------------------------------------------------------------------
+def join_queue_flow(notifier: EmailNotifier) -> None:
     """
     Main flow for a student to join the queue.
 
     Handles both first-time and returning students, validates inputs,
     creates a MeetingRequest, and adds it to the queue.
+    Steps:
+    1. Choose a queue
+    2. Confirm that queue has an active session
+    3. Validate student CWID
+    4. Run first-time or returning-student flow
+    5. Create a MeetingRequest
+    6. Enqueue request
+    7. Queue confirmation/reminder emails
     """
+    selected_queue = select_active_queue()
+    if selected_queue is None:
+        return
+
+    session_and_manager = get_manager_for_active_session(selected_queue["queue_id"])
+    if session_and_manager is None:
+        print("That queue does not currently have an active office-hours session.")
+        return
+
+    session, qm = session_and_manager
+
     print("Welcome to the Ps & Qs Meeting Queue System!\n")
 
     # Step 1: Prompt for CWID and validate it exists in the database.
@@ -359,18 +497,26 @@ def join_queue_flow(qm: MeetingQueueManager) -> None:
         print(f"\nSuccessfully added to the queue! Your current position will be shown in the next queue view.")
     except AlreadyWaitingError:
         print("\nYou are already in the queue. Please wait for your turn or contact support if you need assistance.")
+        return
 
-
+    position = qm.get_position(request.student_id)
     # Show confirmation details.
     print("\nStudent successfully added to the queue.")
     print(f"Name: {request.student_name}")
     print(f"CWID: {request.student_id}")
+    print(f"Queue: {selected_queue['queue_name']}")
+    print(f"Session: {session['title']}")
     print(f"Topic: {request.title}")
     print(f"Joined at: {request.formatted_time}")
-    print(f"Position in queue: {qm.get_position(request.student_id)}")
+    print(f"Position in queue: {position}")
 
+    if request.notification_ok and position is not None:
+        notifier.queue_join_confirmation(request, position)
+        notifier.queue_waiting_reminder(request, delay_minutes=10)
 
-def serve_next_flow(qm: MeetingQueueManager) -> None:
+    notify_students_near_front(qm, notifier)
+
+def serve_next_flow(qm: MeetingQueueManager, notifier: EmailNotifier) -> None:
     """
     Handles the flow for serving the next student in the queue.
 
@@ -391,14 +537,33 @@ def serve_next_flow(qm: MeetingQueueManager) -> None:
     print(f"Joined at: {next_request.formatted_time}")
     print(f"Status: {next_request.status}")
 
-def cancel_flow(qm: MeetingQueueManager) -> None:
+def cancel_flow(notifier: EmailNotifier) -> None:
         """
         Handles the flow for a student to cancel their queue request.
 
         This is a placeholder function to demonstrate how cancellation would work.
         In a real application, this would likely be triggered by the student
         rather than being part of the same CLI as joining the queue.
+        Important note:
+        even though this function has a qm parameter in its signature,
+        we re-select the queue and active session inside this function
+        so that cancellation happens in the correct queue/session context.
+
+        Because of that, the passed-in qm is not actually used here.
+        It is kept only to preserve your preferred function shape/name.
         """
+        selected_queue = select_active_queue()
+        if selected_queue is None:
+            return
+
+        session_and_manager = get_manager_for_active_session(selected_queue["queue_id"])
+        if session_and_manager is None:
+            print("That queue does not currently have an active office-hours session.")
+            return
+
+        # We only need the queue manager here.
+        # The session object is returned too, but is not needed in this function.
+        _, qm = session_and_manager         # _ would be session
         print("\nCancelling your queue request...")
 
         cwid_input = input("Please enter your CWID to confirm cancellation: ").strip()
@@ -412,66 +577,309 @@ def cancel_flow(qm: MeetingQueueManager) -> None:
 
         if success:
             print("Your request has been successfully cancelled.")
+            # After a cancellation, someone else may now be near the front,
+            # so we check whether a near-front email should be queued.
+            notify_students_near_front(qm, notifier)
         else:
             print("You do not have an active request in the queue to cancel.")
+
+def student_view_queue_flow() -> None:
+    """
+    Lets the user choose a queue and view the current merged queue for its active session.
+    """
+    selected_queue = select_active_queue()
+
+    if selected_queue is None:
+        return
+
+    session_and_manager = get_manager_for_active_session(selected_queue["queue_id"])
+
+    if session_and_manager is None:
+        print("That queue does not currently have an active office-hours session.")
+        return
+
+    _, qm = session_and_manager
+    print_queue_view(qm)
+
+def staff_peek_next_flow() -> None:
+    """
+    Lets staff see who will be served next without removing them.
+    """
+    selected_queue = select_active_queue()
+
+    if selected_queue is None:
+        return
+
+    session_and_manager = get_manager_for_active_session(selected_queue["queue_id"])
+
+    if session_and_manager is None:
+        print("No active session for that queue.")
+        return
+
+    _, qm = session_and_manager
+    next_req = qm.peek_next()
+
+    if next_req is None:
+        print("No students are currently waiting.")
+        return
+
+    tier = "DSL" if next_req.is_dsl_queue else "Non-DSL"
+
+    print(f"\nNext student: {next_req.student_name}")
+    print(f"CWID: {next_req.student_id}")
+    print(f"Tier: {tier}")
+    print(f"Topic: {next_req.title}")
+    print(f"Joined: {next_req.formatted_time}")
+
+
+def staff_serve_next_flow(notifier: EmailNotifier) -> None:
+    """
+    Lets staff serve the next student in the queue.
+
+    Side effects:
+    - request status becomes Completed
+    - now-serving email can be queued
+    - near-front notifications may need to be updated for remaining students
+    """
+    selected_queue = select_active_queue()
+
+    if selected_queue is None:
+        return
+
+    session_and_manager = get_manager_for_active_session(selected_queue["queue_id"])
+
+    if session_and_manager is None:
+        print("No active session for that queue.")
+        return
+
+    _, qm = session_and_manager
+
+    print("\nServing the next student...")
+    next_request = qm.dequeue_next()
+
+    if next_request is None:
+        print("No students are currently waiting.")
+        return
+
+    print(f"Now serving: {next_request.student_name} (CWID: {next_request.student_id})")
+    print(f"Topic: {next_request.title}")
+    print(f"Joined at: {next_request.formatted_time}")
+    print(f"Status: {next_request.status}")
+
+    # If the student opted in, queue an email that it is now their turn
+    if next_request.notification_ok:
+        notifier.queue_now_serving_email(next_request)
+
+    # After serving one student, someone else may now be near the front
+    notify_students_near_front(qm, notifier)
+
+
+def staff_add_notes_flow() -> None:
+    """
+    Allows staff to add or update notes for an active request.
+    """
+    selected_queue = select_active_queue()
+
+    if selected_queue is None:
+        return
+
+    session_and_manager = get_manager_for_active_session(selected_queue["queue_id"])
+
+    if session_and_manager is None:
+        print("No active session for that queue.")
+        return
+
+    _, qm = session_and_manager
+
+    cwid_input = input("Enter the student's CWID: ").strip()
+
+    try:
+        cwid = str(int(cwid_input))
+    except ValueError:
+        print("Invalid CWID.")
+        return
+
+    notes = input("Enter professor/TA notes: ").strip()
+
+    success = qm.add_notes_by_student(cwid, notes)
+
+    if success:
+        print("Notes updated successfully.")
+    else:
+        print("That student does not currently have an active request in this queue/session.")
+
+
+def staff_queue_counts_flow() -> None:
+    """
+    Displays DSL, Non-DSL, and total counts for the selected queue/session.
+    """
+    selected_queue = select_active_queue()
+
+    if selected_queue is None:
+        return
+
+    session_and_manager = get_manager_for_active_session(selected_queue["queue_id"])
+
+    if session_and_manager is None:
+        print("No active session for that queue.")
+        return
+
+    _, qm = session_and_manager
+    counts = qm.queue_counts()
+
+    print("\nCurrent queue counts:")
+    print(f"DSL Queue: {counts['DSL']}")
+    print(f"Non-DSL Queue: {counts['Non-DSL']}")
+    print(f"Total: {counts['Total']}")
+
+
+def staff_start_session_flow() -> None:
+    """
+    Lets staff create a new active office-hours session for a queue.
+
+    Current default behavior:
+    - session starts now
+    - session ends 2 hours later
+
+    Later:
+    this can be expanded to allow custom date/time input.
+    """
+    selected_queue = select_active_queue()
+
+    if selected_queue is None:
+        return
+
+    title = prompt_non_empty("Session title: ")
+
+    start_time = datetime.now()
+    end_time = start_time + timedelta(hours=2)
+
+    session_id = create_session(
+        queue_id=selected_queue["queue_id"],
+        title=title,
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+    print(f"Created new session with ID {session_id} for queue '{selected_queue['queue_name']}'.")
+
+
+def staff_reset_session_flow() -> None:
+    """
+    Resets the current active session for a selected queue.
+
+    Current behavior:
+    - all waiting requests in that session are cancelled
+    - the session is marked inactive
+
+    This preserves request history instead of deleting rows.
+    """
+    selected_queue = select_active_queue()
+
+    if selected_queue is None:
+        return
+
+    session = get_active_session_for_queue(selected_queue["queue_id"])
+
+    if session is None:
+        print("No active session for that queue.")
+        return
+
+    qm = PersistMeetingQueueManager(
+        queue_id=selected_queue["queue_id"],
+        session_id=session["session_id"]
+    )
+
+    confirm = prompt_yes_no(
+        f"Reset current session '{session['title']}' for queue '{selected_queue['queue_name']}'? (yes/no): "
+    )
+
+    if not confirm:
+        print("Reset cancelled.")
+        return
+
+    qm.reset_current_session()
+    end_session(session["session_id"])
+
+    print("Session reset complete. Waiting requests were cancelled and the session was ended.")
+
+
+# ------------------------------------------------------------
+# Staff Action=and views
+# ------------------------------------------------------------
 
 def main() -> None:
     """
     Main terminal loop for the queue manager demo.
+    Startup tasks:
+    - create student table if needed
+    - create queue/session/request/email tables if needed
+    - seed starter queues if queue table is empty
+    - start the background email worker
     """
+    create_students_table()
+    initialize_queue_storage()
+    seed_default_queues_if_empty()
 
-    # Create a queue manager instance for this terminal session.
-    qm = MeetingQueueManager()
+    # Create email notifier and start background processing for pending email jobs
+    notifier = EmailNotifier()
+    start_email_worker(notifier, poll_seconds=10)
+
+    # Dummy placeholder queue manager kept so cancel_flow signature can stay as requested.
+    # It is not used directly by cancel_flow because cancel_flow selects the correct queue/session itself.
+    # taken off
 
     while True:
-        print("\n==============================")
+        print("\n========================================")
         print("Ps & Qs Meeting Queue Manager")
-        print("==============================")
-        print("1. Join the queue")
-        print("2. View current queue")
-        print("3. Peek next student")
-        print("4. Serve next student")
-        print("5. Cancel a request by CWID")
-        print("6. Queue counts")
-        print("7. Exit")
+        print("========================================")
+        print("1. Student: Join queue")
+        print("2. Student: View queue")
+        print("3. Student: Cancel my request")
+        print("4. Staff: Peek next student")
+        print("5. Staff: Serve next student")
+        print("6. Staff: Add notes to active request")
+        print("7. Staff: View queue counts")
+        print("8. Staff: Start new office-hours session")
+        print("9. Staff: Reset current session")
+        print("10. Exit")
 
         choice = input("Choose an option: ").strip()
 
         if choice == "1":
-            join_queue_flow(qm)
+            join_queue_flow(notifier)
 
         elif choice == "2":
-            print_queue_view(qm)
+            student_view_queue_flow()
 
         elif choice == "3":
-            next_req = qm.peek_next()
-            if next_req:
-                print(f"\nNext student in line: {next_req.student_name} (CWID: {next_req.student_id}) - Topic: {next_req.title}")
-                tier = "DSL" if next_req.is_dsl_queue else "Non-DSL"
-                print(f"Tier: {tier}")
-                print(f"Joined at: {next_req.formatted_time}")
-            else:
-                print("\nNo students are currently waiting.")
+            cancel_flow(notifier)
 
         elif choice == "4":
-            serve_next_flow(qm)
+            staff_peek_next_flow()
 
         elif choice == "5":
-            cancel_flow(qm)
+            staff_serve_next_flow(notifier)
 
         elif choice == "6":
-            counts = qm.queue_counts()
-            print(f"\nCurrent queue counts:")
-            print(f"DSL Queue: {counts['DSL']}")
-            print(f"Non-DSL Queue: {counts['Non-DSL']}")
-            print(f"Total: {counts['Total']}")
+            staff_add_notes_flow()
 
         elif choice == "7":
+            staff_queue_counts_flow()
+
+        elif choice == "8":
+            staff_start_session_flow()
+
+        elif choice == "9":
+            staff_reset_session_flow()
+
+        elif choice == "10":
             print("Exiting the queue system. Goodbye!")
             break
-        
+
         else:
-            print("Invalid choice. Please enter a number from 1 to 7.")
+            print("Invalid choice. Please enter a number from 1 to 10.")
+
 
 # Start the terminal application only if this file is run directly.
 if __name__ == "__main__":

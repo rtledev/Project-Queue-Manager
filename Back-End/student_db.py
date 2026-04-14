@@ -211,6 +211,11 @@ def update_student_info(
     conn = get_connection()
     cursor = conn.cursor()
 
+    # Normalize emails to lowercase before storing them.
+    # This keeps email values consistent and avoids case-sensitive mismatches later.
+    school_email = school_email.strip().lower()
+    contact_email = contact_email.strip().lower()
+
     cursor.execute("""
         UPDATE students
         SET
@@ -245,6 +250,12 @@ def school_email_matches_cwid(school_email: str, cwid: int) -> bool:
     Checks if the provided school email matches the CWID in the database.
 
     Returns True if it matches, False otherwise.
+
+    Comparison is case-insensitive so that:
+    Bob@gmail.com
+    bob@gmail.com
+    BOB@gmail.com
+    are all treated as the same email.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -252,8 +263,9 @@ def school_email_matches_cwid(school_email: str, cwid: int) -> bool:
     cursor.execute("""
         SELECT 1
         FROM students
-        WHERE cwid = ? AND school_email = ?
-    """, (cwid, school_email))
+        WHERE cwid = ?
+          AND LOWER(school_email) = LOWER(?)
+    """, (cwid, school_email.strip()))
 
     result = cursor.fetchone()
     conn.close()

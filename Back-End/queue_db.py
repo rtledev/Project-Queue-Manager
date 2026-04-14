@@ -3,11 +3,17 @@ queue_db.py
 
 Handles persistent storage for meeting queue requests.
 This keeps the queue alive even if the program closes and restarts.
+- Added queues table for multiple professors / multiple queues
+- Added office_hours_sessions table so stale waiting requests do not carry forever
+- Added meeting_requests persistence with queue_id/session_id
+- Added served_at and cancelled_at timestamps
+- Added notes persistence
+- Added email_jobs table for retry/background/scheduled sends
 """
 
 import json
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timedelta
+from typing import List, Optional, Dict
 
 from student_db import get_connection
 from Priority_Queue import MeetingRequest
@@ -66,14 +72,11 @@ def create_meeting_requests_table() -> None:
     So even after restart, we still ahve history + active queue
     """
     conn = get_connection() # Opens DB connection
-    cursor = conn.cursor    # create curose to run SQL
+    cursor = conn.cursor()    # create curose to run SQL
 
-    cursor.execute(
-        """
-        CREATE TABLE IF NO EXISTS meeting_requests (
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS meeting_requests (
             request_id TEXT PRIMARY KEY,
-            -- unique ID for each request (UUID)
-
             student_id TEXT NOT NULL,
             student_name TEXT NOT NULL,
             email TEXT NOT NULL,
@@ -82,18 +85,22 @@ def create_meeting_requests_table() -> None:
             group_ok INTEGER NOT NULL DEFAULT 0,
             notification_ok INTEGER NOT NULL DEFAULT 0,
             is_dsl_queue INTEGER NOT NULL DEFAULT 0,
+            queue_id INTEGER NOT NULL,
+            session_id INTEGER NOT NULL,
             creation_time TEXT NOT NULL,
             join_seq INTEGER NOT NULL,
             status TEXT NOT NULL DEFAULT 'Waiting',
             notes TEXT NOT NULL DEFAULT '',
-            near_front_notified INTEGER NOT NULL DEFAULT 0
+            served_at TEXT,
+            cancelled_at TEXT,
+            near_front_notified INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (queue_id) REFERENCES queues(queue_id),
             FOREIGN KEY (session_id) REFERENCES office_hours_sessions(session_id)
         )
     """)
-    
-    conn.commit()       #save changes
-    conn.close()
+
+    conn.commit()                    # Save the table creation
+    conn.close()                     # Close the database connection
 
 def create_email_jobs_table() -> None:
     conn = get_connection()
@@ -181,7 +188,6 @@ def list_active_queues() -> List[Dict]:
 
 def seed_default_queues_if_empty() -> None:
     """
-    CHANGED:
     Creates a couple of starter queues only if the table is empty.
 
     You can edit or remove these later.
@@ -296,7 +302,6 @@ def end_session(session_id: int) -> None:
 
 def expire_waiting_requests_for_session(session_id: int) -> None:
     """
-    CHANGED:
     Queue reset per office-hours session.
 
     Instead of deleting waiting rows, we cancel them and preserve history.
@@ -323,7 +328,7 @@ def expire_waiting_requests_for_session(session_id: int) -> None:
 # Meeting request persistence
 # -------------------------------------------------------------------
 
-def insert_meeting_requests(req: MeetingRequest) -> None:
+def insert_meeting_request(req: MeetingRequest) -> None:
     """
     Inserts a NEW request into the database.
 
@@ -389,15 +394,15 @@ def get_waiting_requests(queue_id: int, session_id: int) -> List[MeetingRequest]
     """
 
     conn = get_connection() # Opens DB connection
-    cursor = conn.cursor    # create curose to run SQL
+    cursor = conn.cursor()    # create curose to run SQL
 
     # Only load waiting requests (active queue)
     cursor.execute("""
         SELECT *
         FROM meeting_requests
         WHERE queue_id = ?
-        AND session_id = ?
-        AND status = 'Waiting'
+          AND session_id = ?
+          AND status = 'Waiting'
         ORDER BY join_seq ASC
     """, (queue_id, session_id))
     
@@ -530,7 +535,6 @@ def update_request_status(
 
 def update_request_notes(request_id: str, notes: str) -> None:
     """
-    CHANGED:
     Persists professor/TA notes for a request.
     """
     conn = get_connection()
@@ -679,7 +683,6 @@ def mark_email_job_sent(job_id: int) -> None:
 
 def mark_email_job_failed(job_id: int, error_message: str, retry_delay_seconds: int = 60) -> None:
     """
-    CHANGED:
     Marks an email job as still pending but increments attempt count
     and pushes the next attempt into the future.
     """
@@ -699,3 +702,4 @@ def mark_email_job_failed(job_id: int, error_message: str, retry_delay_seconds: 
 
     conn.commit()
     conn.close()
+

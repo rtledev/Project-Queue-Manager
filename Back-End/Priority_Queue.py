@@ -20,6 +20,12 @@ It is responsible for:
     - cancelling requests
     - reporting queue positions
     as of 2026-03-11, this is the core logic engine that will be used by the CLI and GUI interfaces.
+
+- Added queue_id and session_id to each request
+- Added served_at and cancelled_at tracking
+- Added near_front_notified flag
+- Added load_waiting_requests() for persistent DB reload
+- Kept queue-side student_id consistently as a string
 """
 
 #imports 
@@ -358,7 +364,7 @@ class MeetingQueueManager:
         
         # Mark the request as cancelled.
         req.status = "Cancelled"
-        req.served_at = datetime.now() # Set the cancelled_at timestamp to now
+        req.cancelled_at = datetime.now() # Set the cancelled_at timestamp to now
         # Remove the student from active request tracking.
         self._active_requests_by_student.pop(student_id, None)
 

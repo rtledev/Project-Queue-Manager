@@ -8,16 +8,45 @@ Handles sending email notifcation for meetings:
 Design choice:
 We keep this VERY separte so we can later replace:
     SMTP -> API Service (Sengrid, AWS SES, which ever we end up choosing.. still researching)
+
+- Uses .env via python-dotenv
+- Supports immediate queueing of email jobs instead of direct send only
+- Supports retry behavior through email_jobs table
+- Supports background worker thread
+- Supports scheduled reminder emails
+- Supports "now serving" emails
 """
 
 import os                                       # os.getenv() lets us read environment variables like SMTP_HOST and SMTP_USER.
 import smtplib                                  # smtplib is Python's built-in SMTP client library.
+import threading
+import time
+from datetime import datetime, timedelta
 from email.message import EmailMessage
 
-from Priority_Queue import MeetingRequest
-
 # Optional: load .env here instead of main startup if you want this file to be self-contained.
-from dotenv import load_dotenv
+# Make dotenv optional so the program does not crash if the package is missing.
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv() -> None:
+        """
+        Fallback no-op function if python-dotenv is not installed.
+        This lets the rest of the program still run.
+        """
+        pass
+
+from Priority_Queue import MeetingRequest
+from queue_db import (
+    queue_email_job,
+    get_due_email_jobs,
+    mark_email_job_sent,
+    mark_email_job_failed,
+    get_request_by_id,
+    update_near_front_notified,
+)
+
+# Load variables from .env so SMTP settings are not hardcoded.
 load_dotenv()
 
 class EmailNotifier:
@@ -42,7 +71,7 @@ class EmailNotifier:
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_user = os.getenv("SMTP_USER", "")
         self.smtp_password = os.getenv("SMTP_PASSWORD", "")
-        self.smtp_from = os.getenv("SMTP_FROM", self.smtp_host)
+        self.smtp_from = os.getenv("SMTP_FROM", self.smtp_user)
 
 
     def is_configured(self) -> bool:
@@ -61,6 +90,7 @@ class EmailNotifier:
         """
         Sends a basic email
         Returns True if successful, False otherwise
+        This is used by the background worker when processing queued email jobs.
         """
 
         # If not configured, skip send
@@ -90,41 +120,68 @@ class EmailNotifier:
             print(f"Email failed: {e}")
             return False
         
-    def send_join_confirmation(self, req: MeetingRequest, position: int) -> bool:
+# -------------------------------------------------------------------
+# Email templates → queued jobs
+# -------------------------------------------------------------------
+
+    def queue_join_confirmation(self, req: MeetingRequest, position: int) -> bool:
         """
         Email sent when student joins queue.
+        Queues a join-confirmation email to be sent soon.
         """
-
-        subject = "Queue Confirmation"
+        subject = "Ps & Qs - Queue Confirmation"
 
         body = (
             f"Hello {req.student_name},\n"
             f"~~~~~~~~~~~~~~~~~~~~~"
             f"You are now in the queue.\n"
             f"Position: {position}\n"
+            f"Joined at: {req.formatted_time}\n"
             f"Topic: {req.title}\n"
             f"~~~~~~~~~~~~~~~~~~~~~"
             f"Please wait for your turn."
         )
 
-        return self.send_email(req.email, subject, body)
+        return queue_email_job(
+            recipient=req.email,
+            subject=subject,
+            body=body,
+            request_id=req.request_id,
+            scheduled_for=datetime.now(),
+        )
     
-    def send_near_front_notification(self, req: MeetingRequest, position: int) -> bool:
+    def queue_near_front_notification(self, req: MeetingRequest, position: int) -> bool:
         """
         Email whern student is near the front
         """
-        subject = "You're Almost Up!"
+        subject = "Ps & Qs - You're Almost Up!"
 
         body = (
             f"Hello {req.student_name},\n"
+            f"~~~~~~~~~~~~~~~~~~~~~"
             f"You are near the front of the waitlist.\n"
+            f"Joined at: {req.formatted_time}\n"
             f"Position: {position}\n"
+            f"~~~~~~~~~~~~~~~~~~~~~"
             f"Please be ready!"
         )
 
-        return self.send_email(req.email, subject, body)
+        job_id = queue_email_job(
+            recipient=req.email,
+            subject=subject,
+            body=body,
+            request_id=req.request_id,
+            scheduled_for=datetime.now(),
+        )
+
+        # CHANGEd:
+        # Prevent duplicate near-front notifications.
+        req.near_front_notified = True
+        update_near_front_notified(req.request_id, True)
+
+        return job_id
     
-    def send_now_serving_email(self, req: MeetingRequest, position: int) -> bool:
+    def queue_now_serving_email(self, req: MeetingRequest) -> bool:
         """
         Sends an email when the student is now being served.
         """
@@ -134,10 +191,104 @@ class EmailNotifier:
             f"Hello {req.student_name},\n\n"
             f"~~~~~~~~~~~~~~~~~~~~~"
             f"It is now your turn.\n"
-            f"Position: {position}\n"
             f"Topic: {req.title}\n\n"
             f"~~~~~~~~~~~~~~~~~~~~~"
             f"Please join the office hours now."
         )
 
-        return self.send_email(req.email, subject, body)
+        return queue_email_job(
+            recipient=req.email,
+            subject=subject,
+            body=body,
+            request_id=req.request_id,
+            scheduled_for=datetime.now(),
+        )
+    def queue_waiting_reminder(self, req: MeetingRequest, delay_minutes: int = 10) -> int:
+            """
+            CHANGED:
+            Queues a scheduled reminder to be sent in the future.
+
+            This is a simple first version of scheduled reminders.
+            """
+            subject = "Ps & Qs Queue Reminder"
+            body = (
+                f"Hello {req.student_name},\n\n"
+                f"This is a reminder that you are still in the queue.\n"
+                f"Topic: {req.title}\n\n"
+                f"You will receive another update when you are closer to the front."
+            )
+
+            scheduled_for = datetime.now() + timedelta(minutes=delay_minutes)
+
+            return queue_email_job(
+                recipient=req.email,
+                subject=subject,
+                body=body,
+                request_id=req.request_id,
+                scheduled_for=scheduled_for,
+            )
+
+
+def process_due_email_jobs(notifier: EmailNotifier, limit: int = 10) -> None:
+    """
+    CHANGED:
+    Processes due pending email jobs.
+
+    Retry behavior:
+    - if sending fails, the job remains pending
+    - scheduled_for is pushed into the future
+    - attempt_count increases
+    """
+    jobs = get_due_email_jobs(limit=limit)
+
+    for job in jobs:
+        request_id = job["request_id"]
+
+        # If this job is linked to a request, make sure that request still makes sense.
+        # Example:
+        # scheduled reminder should not fire for a completed/cancelled request.
+        if request_id:
+            req = get_request_by_id(request_id)
+            if req is None:
+                mark_email_job_sent(job["job_id"])
+                continue
+
+            if req.status != "Waiting" and "Reminder" in job["subject"]:
+                mark_email_job_sent(job["job_id"])
+                continue
+
+        success = notifier.send_email(
+            to_email=job["recipient"],
+            subject=job["subject"],
+            body=job["body"],
+        )
+
+        if success:
+            mark_email_job_sent(job["job_id"])
+        else:
+            mark_email_job_failed(
+                job_id=job["job_id"],
+                error_message="SMTP send failed",
+                retry_delay_seconds=60,
+            )
+
+def _email_worker_loop(notifier: EmailNotifier, poll_seconds: int) -> None:
+    """
+    Background loop for email processing.
+    """
+    while True:
+        process_due_email_jobs(notifier)
+        time.sleep(poll_seconds)
+
+
+def start_email_worker(notifier: EmailNotifier, poll_seconds: int = 10) -> threading.Thread:
+    """
+    Starts a daemon thread that keeps processing queued email jobs.
+    """
+    worker = threading.Thread(
+        target=_email_worker_loop,
+        args=(notifier, poll_seconds),
+        daemon=True,
+    )
+    worker.start()
+    return worker
