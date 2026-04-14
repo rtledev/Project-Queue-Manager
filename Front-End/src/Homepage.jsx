@@ -1,38 +1,26 @@
 // Import hooks from React.
-// useState lets this component store values that can change over time.
-// useEffect lets this component run code automatically after the component renders,
-// which is useful for things like fetching data from the backend API.
+// useState lets this component store values that can change while the app is running.
+// useEffect lets this component run code automatically after rendering,
+// which is useful for loading backend data when the page opens.
 import { useEffect, useState } from "react";
 
 // Import smaller UI components used by this page.
-// Splitting the page this way keeps the logic here while moving
-// large visual sections into their own files.
+// Splitting the page this way keeps the backend/data logic here,
+// while moving larger visual sections into their own files.
 import LoginPage from "./components/LoginPage";
 import OfficeHoursList from "./components/OfficeHoursList";
 import QueueStatusCard from "./components/QueueStatusCard";
 import HomeInfoCards from "./components/HomeInfoCards";
 import DashboardPage from "./components/DashboardPage";
+import ProfilePage from "./components/ProfilePage";
 
-// HomePage is a separate component responsible for rendering the homepage.
-// It receives two props:
-// onLogin -> switches to the login page
+// HomePage is the main student-facing homepage.
+// It receives four props:
+// onLogin -> switches to the login/signup page
 // onOpenDashboard -> switches to the professor / TA dashboard page
-function HomePage({ onLogin, onOpenDashboard }) {
-
-    /*
-      TEST_STUDENT_ID is a temporary hard-coded student identifier used during
-      frontend/backend testing.
-
-      Right now, this acts as the "current student" for queue actions and
-      queue status lookup.
-
-      Later, this should come from:
-      - a real login system
-      - session data
-      - or the student's saved profile/account information
-    */
-    const TEST_STUDENT_ID = "12345678";
-
+// currentStudent -> the currently signed-in student account
+// onLogout -> clears the current student and logs them out
+function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onLogout }) {
     /*
       officeHours stores the list of office-hours sessions returned by the backend API.
       It starts as an empty array because no data has been loaded yet.
@@ -64,7 +52,8 @@ function HomePage({ onLogin, onOpenDashboard }) {
       If the backend finds an active request, queueStatus is updated with the response.
 
       If no active request exists, we quietly clear the card instead of treating that
-      situation as a major user-facing error. That keeps the homepage cleaner on first load.
+      situation as a major user-facing error. That keeps the homepage cleaner on first load
+      or after logout/cancellation.
     */
     async function fetchQueueStatus(studentId) {
         try {
@@ -95,16 +84,15 @@ function HomePage({ onLogin, onOpenDashboard }) {
     }
 
     /*
-      useEffect runs after the component is first rendered.
+      useEffect runs after the component is first rendered and whenever
+      currentStudent changes.
 
-      We use it here to load the homepage data from the backend when the page first opens.
+      We use it here to:
+      1. load the office-hours cards from the backend
+      2. restore queue status for the currently signed-in student
 
-      On initial page load, we do two things:
-      1. fetch the office-hours cards
-      2. try to restore the queue status for the current test student
-
-      The empty dependency array [] means this runs only once when the page first loads,
-      not every single time the component re-renders.
+      If no student is signed in, the homepage still loads office hours,
+      but the queue status card is cleared.
     */
     useEffect(() => {
         async function loadPageData() {
@@ -128,30 +116,37 @@ function HomePage({ onLogin, onOpenDashboard }) {
 
             /*
               After loading the office-hours data, also check whether the current
-              test student already has an active queue request in the backend.
+              signed-in student already has an active queue request in the backend.
 
               This allows the Queue Status card to reappear after a browser refresh
-              as long as the backend server still has that student in memory.
+              as long as the backend still has that student in memory.
             */
-            await fetchQueueStatus(TEST_STUDENT_ID);
+            if (currentStudent?.cwid) {
+                await fetchQueueStatus(currentStudent.cwid);
+            } else {
+                setQueueStatus(null);
+                setStatusError("");
+            }
         }
 
         loadPageData();
-    }, []);
+    }, [currentStudent]);
 
     /*
       handleJoinQueue sends a POST request to the backend when the user clicks
       the "Join Queue" button for a session.
 
-      For now, this uses temporary test student data so we can confirm the
-      frontend and backend are connected correctly.
+      This version no longer uses a hard-coded test student.
+      Instead, it uses the currently signed-in student account.
 
-      Later, this data should come from:
-      - the logged-in student
-      - a join form
-      - or student profile information stored in the system
+      If no student is signed in yet, the user is prompted to log in or create an account first.
     */
     async function handleJoinQueue(person) {
+        if (!currentStudent) {
+            setJoinMessage("Please log in or create an account before joining the queue.");
+            return;
+        }
+
         try {
             setJoinMessage("");
             setStatusError("");
@@ -162,13 +157,13 @@ function HomePage({ onLogin, onOpenDashboard }) {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                    student_id: TEST_STUDENT_ID,
-                    student_name: "Israel Zavala",
-                    email: "name@csu.fullerton.edu",
+                    student_id: currentStudent.cwid,
+                    student_name: `${currentStudent.first_name} ${currentStudent.last_name}`.trim(),
+                    email: currentStudent.contact_email || currentStudent.school_email,
                     title: `Help session with ${person.name}`,
                     notification_ok: true,
                     group_ok: true,
-                    is_dsl_queue: false,
+                    is_dsl_queue: currentStudent.dsl_status,
                 }),
             });
 
@@ -186,7 +181,7 @@ function HomePage({ onLogin, onOpenDashboard }) {
               After a successful join, immediately fetch the student's latest queue status
               so the status card updates with the current position.
             */
-            await fetchQueueStatus(TEST_STUDENT_ID);
+            await fetchQueueStatus(currentStudent.cwid);
 
             /*
               Refresh office-hours data after joining so the waiting counts shown on the page
@@ -195,7 +190,6 @@ function HomePage({ onLogin, onOpenDashboard }) {
             const refreshResponse = await fetch("http://127.0.0.1:5000/api/office-hours");
             const refreshedData = await refreshResponse.json();
             setOfficeHours(refreshedData);
-
         } catch (err) {
             setJoinMessage(err.message || "Something went wrong while joining the queue.");
         }
@@ -205,15 +199,19 @@ function HomePage({ onLogin, onOpenDashboard }) {
       handleCancelQueue sends a POST request to the backend when the user clicks
       the cancel button inside the Queue Status card.
 
+      This version uses the currently signed-in student account.
+
       If cancellation succeeds:
       - a success message is shown
       - the local queue status card is cleared
       - office-hours counts are refreshed from the backend
-
-      This completes the basic student-side flow:
-      join -> view status -> cancel
     */
     async function handleCancelQueue() {
+        if (!currentStudent) {
+            setJoinMessage("Please log in before cancelling a queue request.");
+            return;
+        }
+
         try {
             setJoinMessage("");
             setStatusError("");
@@ -224,7 +222,7 @@ function HomePage({ onLogin, onOpenDashboard }) {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                    student_id: TEST_STUDENT_ID,
+                    student_id: currentStudent.cwid,
                 }),
             });
 
@@ -244,14 +242,13 @@ function HomePage({ onLogin, onOpenDashboard }) {
             const refreshResponse = await fetch("http://127.0.0.1:5000/api/office-hours");
             const refreshedData = await refreshResponse.json();
             setOfficeHours(refreshedData);
-
         } catch (err) {
             setJoinMessage(err.message || "Something went wrong while cancelling the queue.");
         }
     }
 
     return (
-        // Outer wrapper for the homepage
+        // Outer wrapper for the homepage.
         <div className="min-h-screen bg-slate-100 text-slate-800">
 
             {/* Main page layout container */}
@@ -282,11 +279,20 @@ function HomePage({ onLogin, onOpenDashboard }) {
                                 Office Hours
                             </button>
 
-                            {/* Placeholder navigation button */}
-                            <button className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100">
+                            {/*
+                            Profile navigation button.
+                            Clicking this button calls onOpenProfile.
+                            onOpenProfile is provided by the parent component and changes
+                            the current page to the student's profile page.
+                            */}
+                            <button
+                                onClick={onOpenProfile}
+                                className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100"
+                            >
                                 <span className="text-base">👤</span>
                                 Profile
                             </button>
+
                         </div>
                     </nav>
                 </aside>
@@ -300,26 +306,67 @@ function HomePage({ onLogin, onOpenDashboard }) {
                     */}
                     <div className="mb-8 flex flex-col gap-4 rounded-3xl bg-white p-6 shadow-sm md:flex-row md:items-center md:justify-between">
 
-                        {/* Welcome text */}
+                        {/* Welcome text and signed-in student label */}
                         <div>
                             <h2 className="text-3xl font-bold tracking-tight text-slate-900">Welcome to Ps &amp; Qs</h2>
                             <p className="mt-2 max-w-2xl text-sm text-slate-500 md:text-base">
                                 Join office hours, view available staff, and keep track of your queue position in one place.
                             </p>
+
+                            {/*
+                              If a student is currently signed in, show their name below the welcome text.
+                            */}
+                            {currentStudent && (
+                                <p className="mt-3 text-sm text-slate-600">
+                                    Signed in as{" "}
+                                    <span className="font-medium text-slate-900">
+                                        {currentStudent.first_name} {currentStudent.last_name}
+                                    </span>
+                                </p>
+                            )}
                         </div>
 
                         {/* Action buttons */}
                         <div className="flex gap-3">
 
                             {/*
-                              Clicking this button calls onLogin.
-                              onLogin is provided by the parent component and changes the current page to "login".
+                              If no student is signed in, show the login/signup button.
+
+                              onLogin is provided by the parent component and changes
+                              the current page to the authentication page.
+                            */}
+                            {!currentStudent ? (
+                                <button
+                                    onClick={onLogin}
+                                    className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                >
+                                    Log In / Sign Up
+                                </button>
+                            ) : (
+                                /*
+                                  If a student is already signed in, replace the login button
+                                  with a logout button.
+
+                                  onLogout is provided by the parent component and clears
+                                  the current student from app state and localStorage.
+                                */
+                                <button
+                                    onClick={onLogout}
+                                    className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                >
+                                    Log Out
+                                </button>
+                            )}
+                            {/*
+                            Clicking this button calls onOpenProfile.
+                            onOpenProfile is provided by the parent component and changes
+                            the current page to the student's profile page.
                             */}
                             <button
-                                onClick={onLogin}
+                                onClick={onOpenProfile}
                                 className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
                             >
-                                Log In
+                                Open Profile
                             </button>
 
                             {/*
@@ -351,6 +398,7 @@ function HomePage({ onLogin, onOpenDashboard }) {
                         </div>
                     )}
 
+                    {/* Main content area split into two columns */}
                     <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
 
                         {/* Left column: available office hours cards */}
@@ -361,7 +409,7 @@ function HomePage({ onLogin, onOpenDashboard }) {
                             onJoinQueue={handleJoinQueue}
                         />
 
-                        {/* Right column: informational sections and live queue status */}
+                        {/* Right column: queue status and informational cards */}
                         <div className="space-y-6">
                             <QueueStatusCard
                                 queueStatus={queueStatus}
@@ -379,21 +427,97 @@ function HomePage({ onLogin, onOpenDashboard }) {
 }
 
 // This is the main exported component for the file.
-// It controls which page to show.
-//
-// page is a state variable.
-// setPage is the function used to change page.
-// The initial value is "home", so the app starts on the home page.
+// It controls which page to show and stores the currently authenticated student.
 export default function PsNQsHomepage() {
+    /*
+      currentStudent stores the signed-in student account for the current browser session.
+
+      We initialize it from localStorage so the app can remember who is logged in
+      even after a browser refresh.
+    */
+    const [currentStudent, setCurrentStudent] = useState(() => {
+        const savedStudent = localStorage.getItem("psnqs_current_student");
+        return savedStudent ? JSON.parse(savedStudent) : null;
+    });
+
+
+    /*
+      page is a state variable.
+      setPage is the function used to change page.
+      The initial value is "home", so the app starts on the home page.
+    */
     const [page, setPage] = useState("home");
+
+    /*
+      handleLoginSuccess is called after either:
+      - a successful login
+      - a successful signup
+
+      It stores the student in React state and in localStorage,
+      then returns the user to the homepage.
+    */
+    function handleLoginSuccess(student) {
+        setCurrentStudent(student);
+        localStorage.setItem("psnqs_current_student", JSON.stringify(student));
+        setPage("home");
+    }
+
+    /*
+   handleProfileUpdated is called after the Profile page successfully saves changes.
+
+   It updates the current student in both React state and localStorage
+   so the homepage and other pages immediately reflect the newest profile data.
+   */
+    function handleProfileUpdated(student) {
+        setCurrentStudent(student);
+        localStorage.setItem("psnqs_current_student", JSON.stringify(student));
+    }
+
+    /*
+      handleLogout clears the current student from both React state and localStorage,
+      then returns the user to the homepage.
+    */
+    function handleLogout() {
+        setCurrentStudent(null);
+        localStorage.removeItem("psnqs_current_student");
+        setPage("home");
+    }
 
     /*
       Conditional rendering:
       If page is equal to "login", render the LoginPage component.
+
       onBack is passed down so LoginPage can switch the page back to "home".
+      onLoginSuccess is passed down so LoginPage can send the authenticated
+      student account back to this parent component.
     */
     if (page === "login") {
-        return <LoginPage onBack={() => setPage("home")} />;
+        return (
+            <LoginPage
+                onBack={() => setPage("home")}
+                onLoginSuccess={handleLoginSuccess}
+            />
+        );
+    }
+
+    /*
+        If page is equal to "profile", render the ProfilePage component.
+
+        currentStudent is passed down so the page can load the correct student profile.
+        onBack is passed down so ProfilePage can switch back to the home page.
+        onProfileUpdated is passed down so ProfilePage can send the updated
+        student object back to this parent component after a successful save.
+        onLogout is passed down so the user can log out directly from the profile page.
+    */
+    if (page === "profile") {
+        return (
+            <ProfilePage
+                currentStudent={currentStudent}
+                onBack={() => setPage("home")}
+                onProfileUpdated={handleProfileUpdated}
+                onLogout={handleLogout}
+            />
+        );
     }
 
     /*
@@ -407,13 +531,19 @@ export default function PsNQsHomepage() {
     /*
       If neither condition above is true, render the HomePage component.
 
-      onLogin is passed down so HomePage can switch the page to "login".
-      onOpenDashboard is passed down so HomePage can switch the page to "dashboard".
+      onLogin is passed down so HomePage can switch the page to the auth page.
+      onOpenDashboard is passed down so HomePage can switch the page to the dashboard.
+      onOpenProfile is passed down so HomePage can switch the page to the profile page.
+      currentStudent is passed down so HomePage can use the signed-in student for queue actions.
+      onLogout is passed down so HomePage can log the current student out.
     */
     return (
         <HomePage
             onLogin={() => setPage("login")}
             onOpenDashboard={() => setPage("dashboard")}
+            onOpenProfile={() => setPage("profile")}
+            currentStudent={currentStudent}
+            onLogout={handleLogout}
         />
     );
 }

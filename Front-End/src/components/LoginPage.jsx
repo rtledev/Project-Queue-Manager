@@ -1,45 +1,126 @@
-// LoginPage is a separate component responsible for rendering the login screen.
-// It receives one prop: onBack.
-// onBack is a function passed in from the parent so this page can switch back to the home page.
-export default function LoginPage({ onBack }) {
+import { useState } from "react";
+
+// LoginPage is the authentication page for the app.
+// It supports two modes:
+// 1. login
+// 2. sign up
+//
+// It receives two props:
+// onBack -> returns the user to the homepage
+// onLoginSuccess -> sends the authenticated student back to the parent component
+export default function LoginPage({ onBack, onLoginSuccess }) {
+
+    /*
+      mode controls whether the card is showing the login form
+      or the sign-up form.
+    */
+    const [mode, setMode] = useState("login");
+
+    /*
+      message stores success or error feedback shown to the user.
+    */
+    const [message, setMessage] = useState("");
+
+    /*
+      loginForm stores the input values for the login flow.
+    */
+    const [loginForm, setLoginForm] = useState({
+        cwid: "",
+        school_email: "",
+        password: "",
+    });
+
+    /*
+      signupForm stores the input values for the sign-up flow.
+    */
+    const [signupForm, setSignupForm] = useState({
+        cwid: "",
+        first_name: "",
+        middle_initial: "",
+        last_name: "",
+        school_email: "",
+        contact_email: "",
+        phone_number: "",
+        dsl_status: false,
+        password: "",
+    });
+
+    /*
+      handleLoginSubmit sends the login form data to the backend.
+      If authentication succeeds, the returned student object is
+      passed back to the parent through onLoginSuccess.
+    */
+    async function handleLoginSubmit(event) {
+        event.preventDefault();
+
+        try {
+            setMessage("");
+
+            const response = await fetch("http://127.0.0.1:5000/api/auth/login", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(loginForm),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "Unable to log in.");
+            }
+
+            setMessage("Login successful.");
+            onLoginSuccess(data.student);
+        } catch (err) {
+            setMessage(err.message || "Something went wrong while logging in.");
+        }
+    }
+
+    /*
+      handleSignupSubmit sends the sign-up form data to the backend.
+      If account creation succeeds, the new student object is passed
+      back to the parent through onLoginSuccess so the user is effectively
+      signed in immediately after signup.
+    */
+    async function handleSignupSubmit(event) {
+        event.preventDefault();
+
+        try {
+            setMessage("");
+
+            const response = await fetch("http://127.0.0.1:5000/api/auth/signup", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(signupForm),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "Unable to create account.");
+            }
+
+            setMessage("Account created successfully.");
+            onLoginSuccess(data.student);
+        } catch (err) {
+            setMessage(err.message || "Something went wrong while creating the account.");
+        }
+    }
+
     return (
-        // Outer wrapper for the whole login page.
-        // min-h-screen makes the page at least the full height of the screen.
-        // bg-slate-100 sets the background color.
-        // text-slate-800 sets the default text color.
         <div className="min-h-screen bg-slate-100 text-slate-800">
-
-            {/* 
-               Main page layout container.
-               mx-auto centers the container horizontally.
-               flex makes the sidebar and main content sit side by side.
-               max-w-7xl limits the overall width so the page does not stretch too far.
-            */}
             <div className="mx-auto flex min-h-screen max-w-7xl">
-
-                {/*
-                  Sidebar area.
-                  hidden means it is hidden on small screens.
-                  lg:flex means it becomes visible and uses flex layout on large screens and up.
-                  w-64 gives the sidebar a fixed width.
-                */}
                 <aside className="hidden w-64 flex-col border-r border-slate-200 bg-white lg:flex">
-
-                    {/* Branding / logo section at the top of the sidebar */}
                     <div className="border-b border-slate-200 px-8 py-8">
                         <h1 className="text-3xl font-bold tracking-tight text-slate-900">PsNQs</h1>
                         <p className="mt-2 text-sm text-slate-500">Meeting Queue Manager</p>
                     </div>
 
-                    {/* Navigation area inside the sidebar */}
                     <nav className="flex-1 px-4 py-6">
                         <div className="space-y-2">
-
-                            {/*
-                              Home button.
-                              When clicked, it calls onBack.
-                              onBack comes from the parent component and changes the page back to "home".
-                            */}
                             <button
                                 onClick={onBack}
                                 className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100"
@@ -48,101 +129,225 @@ export default function LoginPage({ onBack }) {
                                 Home
                             </button>
 
-                            {/*
-                              Login button in the sidebar.
-                              This one is styled as the active/current page.
-                              It does not need an onClick here because the user is already on the login page.
-                            */}
                             <button className="flex w-full items-center gap-3 rounded-2xl bg-blue-50 px-4 py-3 text-left text-sm font-medium text-blue-700">
                                 <span className="text-base">🔐</span>
-                                Log In
+                                {mode === "login" ? "Log In" : "Sign Up"}
                             </button>
                         </div>
                     </nav>
                 </aside>
 
-                {/*
-                  Main content area for the login card.
-                  flex-1 makes it take the remaining width not used by the sidebar.
-                  items-center and justify-center center the login box vertically and horizontally.
-                */}
                 <main className="flex flex-1 items-center justify-center p-6 md:p-10">
-
-                    {/* Login form card */}
                     <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-sm">
-
-                        {/* Heading section inside the card */}
                         <div className="mb-8 text-center">
-                            <h2 className="text-3xl font-bold tracking-tight text-slate-900">Welcome Back</h2>
+                            <h2 className="text-3xl font-bold tracking-tight text-slate-900">
+                                {mode === "login" ? "Welcome Back" : "Create Your Account"}
+                            </h2>
                             <p className="mt-2 text-sm text-slate-500">
-                                Sign in to view your queue status, meetings, and profile.
+                                {mode === "login"
+                                    ? "Log in to join the queue with your saved student account."
+                                    : "Create an account so your queue requests use your real student information."}
                             </p>
                         </div>
 
-                        {/*
-                          Form element for login inputs.
-                          Right now, this is only visual.
-                          It does not yet have any state variables, submit handler, or backend connection.
-                        */}
-                        <form className="space-y-5">
-
-                            {/* Email input group */}
-                            <div>
-                                <label className="mb-2 block text-sm font-medium text-slate-700">School Email</label>
-                                <input
-                                    type="email"
-                                    placeholder="name@csu.fullerton.edu"
-                                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
-                                />
-                            </div>
-
-                            {/* Password input group */}
-                            <div>
-                                <label className="mb-2 block text-sm font-medium text-slate-700">Password</label>
-                                <input
-                                    type="password"
-                                    placeholder="Enter your password"
-                                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
-                                />
-                            </div>
-
-                            {/*
-                              Row containing the "Remember me" checkbox and the "Forgot password?" button.
-                              justify-between places them on opposite sides of the row.
-                            */}
-                            <div className="flex items-center justify-between text-sm">
-                                <label className="flex items-center gap-2 text-slate-600">
-                                    <input type="checkbox" className="rounded" />
-                                    Remember me
-                                </label>
-
-                                {/*
-                                  type="button" is important here.
-                                  Without it, a button inside a form defaults to type="submit".
-                                  This button should not submit the form.
-                                */}
-                                <button type="button" className="font-medium text-blue-600 hover:text-blue-700">
-                                    Forgot password?
-                                </button>
-                            </div>
-
-                            {/*
-                              Submit button for the login form.
-                              type="submit" tells the browser this button submits the form.
-                              Since no onSubmit handler exists yet, this is still just part of the UI.
-                            */}
+                        <div className="mb-6 flex rounded-2xl bg-slate-100 p-1">
                             <button
-                                type="submit"
-                                className="w-full rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+                                onClick={() => setMode("login")}
+                                className={`flex-1 rounded-2xl px-4 py-2 text-sm font-medium ${mode === "login"
+                                        ? "bg-white text-slate-900 shadow-sm"
+                                        : "text-slate-600"
+                                    }`}
                             >
                                 Log In
                             </button>
-                        </form>
+                            <button
+                                onClick={() => setMode("signup")}
+                                className={`flex-1 rounded-2xl px-4 py-2 text-sm font-medium ${mode === "signup"
+                                        ? "bg-white text-slate-900 shadow-sm"
+                                        : "text-slate-600"
+                                    }`}
+                            >
+                                Sign Up
+                            </button>
+                        </div>
 
-                        {/*
-                          Bottom text and back button.
-                          Clicking "Return home" also calls onBack to switch pages.
-                        */}
+                        {message && (
+                            <div className="mb-6 rounded-2xl bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                                {message}
+                            </div>
+                        )}
+
+                        {mode === "login" ? (
+                            <form className="space-y-5" onSubmit={handleLoginSubmit}>
+                                <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">CWID</label>
+                                    <input
+                                        type="text"
+                                        value={loginForm.cwid}
+                                        onChange={(e) =>
+                                            setLoginForm({ ...loginForm, cwid: e.target.value })
+                                        }
+                                        placeholder="12345678"
+                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">School Email</label>
+                                    <input
+                                        type="email"
+                                        value={loginForm.school_email}
+                                        onChange={(e) =>
+                                            setLoginForm({ ...loginForm, school_email: e.target.value })
+                                        }
+                                        placeholder="name@csu.fullerton.edu"
+                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">Password</label>
+                                    <input
+                                        type="password"
+                                        value={loginForm.password}
+                                        onChange={(e) =>
+                                            setLoginForm({ ...loginForm, password: e.target.value })
+                                        }
+                                        placeholder="Enter your password"
+                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    className="w-full rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+                                >
+                                    Log In
+                                </button>
+                            </form>
+                        ) : (
+                            <form className="space-y-5" onSubmit={handleSignupSubmit}>
+                                <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">CWID</label>
+                                    <input
+                                        type="text"
+                                        value={signupForm.cwid}
+                                        onChange={(e) =>
+                                            setSignupForm({ ...signupForm, cwid: e.target.value })
+                                        }
+                                        placeholder="12345678"
+                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">First Name</label>
+                                    <input
+                                        type="text"
+                                        value={signupForm.first_name}
+                                        onChange={(e) =>
+                                            setSignupForm({ ...signupForm, first_name: e.target.value })
+                                        }
+                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">Middle Initial</label>
+                                    <input
+                                        type="text"
+                                        value={signupForm.middle_initial}
+                                        onChange={(e) =>
+                                            setSignupForm({ ...signupForm, middle_initial: e.target.value })
+                                        }
+                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">Last Name</label>
+                                    <input
+                                        type="text"
+                                        value={signupForm.last_name}
+                                        onChange={(e) =>
+                                            setSignupForm({ ...signupForm, last_name: e.target.value })
+                                        }
+                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">School Email</label>
+                                    <input
+                                        type="email"
+                                        value={signupForm.school_email}
+                                        onChange={(e) =>
+                                            setSignupForm({ ...signupForm, school_email: e.target.value })
+                                        }
+                                        placeholder="name@csu.fullerton.edu"
+                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">Contact Email</label>
+                                    <input
+                                        type="email"
+                                        value={signupForm.contact_email}
+                                        onChange={(e) =>
+                                            setSignupForm({ ...signupForm, contact_email: e.target.value })
+                                        }
+                                        placeholder="Optional, blank uses school email"
+                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">Phone Number</label>
+                                    <input
+                                        type="text"
+                                        value={signupForm.phone_number}
+                                        onChange={(e) =>
+                                            setSignupForm({ ...signupForm, phone_number: e.target.value })
+                                        }
+                                        placeholder="+1(###)-###-####"
+                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div className="flex items-center gap-2 text-sm text-slate-600">
+                                    <input
+                                        type="checkbox"
+                                        checked={signupForm.dsl_status}
+                                        onChange={(e) =>
+                                            setSignupForm({ ...signupForm, dsl_status: e.target.checked })
+                                        }
+                                    />
+                                    DSL Student
+                                </div>
+
+                                <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">Password</label>
+                                    <input
+                                        type="password"
+                                        value={signupForm.password}
+                                        onChange={(e) =>
+                                            setSignupForm({ ...signupForm, password: e.target.value })
+                                        }
+                                        placeholder="Create a password"
+                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    className="w-full rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+                                >
+                                    Create Account
+                                </button>
+                            </form>
+                        )}
+
                         <div className="mt-6 text-center text-sm text-slate-500">
                             Need to go back?{" "}
                             <button onClick={onBack} className="font-medium text-blue-600 hover:text-blue-700">

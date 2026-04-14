@@ -14,6 +14,8 @@ from flask_cors import CORS
 # AlreadyWaitingError -> custom error if a student is already in queue
 from Priority_Queue import MeetingQueueManager, MeetingRequest, AlreadyWaitingError
 
+# Initialize the student database schema needed for account creation/login
+from student_db import initialize_student_db, create_student_account, authenticate_student
 
 # Create the Flask application instance.
 # __name__ tells Flask where this file is located.
@@ -30,6 +32,8 @@ CORS(app)
 # If the server restarts, the queue will reset.
 qm = MeetingQueueManager()
 
+# Initialize The student database needed for account creation/login
+initialize_student_db()
 
 # Temporary mock data for office hours sessions.
 # Right now this is hardcoded.
@@ -87,6 +91,164 @@ def get_office_hours():
     # Return the list as a JSON response.
     return jsonify(data)
 
+# -------------------------------
+# POST: /api/auth/signup
+# -------------------------------
+# This endpoint creates or completes a student account.
+@app.post("/api/auth/signup")
+def auth_signup():
+
+    # Extract JSON data sent from the frontend.
+    data = request.get_json()
+
+    # Required fields for signup.
+    required_fields = [
+        "cwid",
+        "first_name",
+        "last_name",
+        "school_email",
+        "password",
+    ]
+
+    # Validate required fields.
+    for field in required_fields:
+        if field not in data or str(data[field]).strip() == "":
+            return jsonify({"error": f"Missing required field: {field}"}), 400
+
+    try:
+        cwid = int(data["cwid"])
+    except ValueError:
+        return jsonify({"error": "CWID must be numeric."}), 400
+
+    contact_email = str(data.get("contact_email", "")).strip()
+    if contact_email == "":
+        contact_email = data["school_email"]
+
+    student = create_student_account(
+        cwid=cwid,
+        first_name=data["first_name"].strip(),
+        middle_initial=str(data.get("middle_initial", "")).strip(),
+        last_name=data["last_name"].strip(),
+        school_email=data["school_email"].strip(),
+        contact_email=contact_email,
+        phone_number=str(data.get("phone_number", "")).strip(),
+        dsl_status=bool(data.get("dsl_status", False)),
+        password=data["password"],
+    )
+
+    if student is None:
+        return jsonify({
+            "error": "Unable to create account. Make sure the CWID exists in the system."
+        }), 400
+
+    return jsonify({
+        "message": "Account created successfully.",
+        "student": student
+    }), 201
+
+
+# -------------------------------
+# POST: /api/auth/login
+# -------------------------------
+# This endpoint authenticates a student account.
+@app.post("/api/auth/login")
+def auth_login():
+
+    # Extract JSON data sent from the frontend.
+    data = request.get_json()
+
+    # Required fields for login.
+    required_fields = ["cwid", "school_email", "password"]
+
+    # Validate required fields.
+    for field in required_fields:
+        if field not in data or str(data[field]).strip() == "":
+            return jsonify({"error": f"Missing required field: {field}"}), 400
+
+    try:
+        cwid = int(data["cwid"])
+    except ValueError:
+        return jsonify({"error": "CWID must be numeric."}), 400
+
+    student = authenticate_student(
+        cwid=cwid,
+        school_email=data["school_email"].strip(),
+        password=data["password"],
+    )
+
+    if student is None:
+        return jsonify({"error": "Invalid CWID, school email, or password."}), 401
+
+    return jsonify({
+        "message": "Login successful.",
+        "student": student
+    }), 200
+
+# -------------------------------
+# GET: /api/profile/<cwid>
+# -------------------------------
+# This endpoint returns one student's saved profile information.
+@app.get("/api/profile/<int:cwid>")
+def get_profile(cwid):
+    from student_db import get_student_by_cwid
+
+    student = get_student_by_cwid(cwid)
+
+    if student is None:
+        return jsonify({"error": "Student not found."}), 404
+
+    return jsonify(student), 200
+
+
+# -------------------------------
+# POST: /api/profile/update
+# -------------------------------
+# This endpoint updates editable student profile fields.
+@app.post("/api/profile/update")
+def update_profile():
+    from student_db import update_student_info, get_student_by_cwid
+
+    data = request.get_json()
+
+    required_fields = [
+        "cwid",
+        "first_name",
+        "middle_initial",
+        "last_name",
+        "school_email",
+        "contact_email",
+        "phone_number",
+        "dsl_status",
+    ]
+
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"error": f"Missing required field: {field}"}), 400
+
+    try:
+        cwid = int(data["cwid"])
+    except ValueError:
+        return jsonify({"error": "CWID must be numeric."}), 400
+
+    updated = update_student_info(
+        cwid=cwid,
+        first_name=str(data["first_name"]).strip(),
+        middle_initial=str(data["middle_initial"]).strip(),
+        last_name=str(data["last_name"]).strip(),
+        school_email=str(data["school_email"]).strip(),
+        contact_email=str(data["contact_email"]).strip(),
+        phone_number=str(data["phone_number"]).strip(),
+        dsl_status=bool(data["dsl_status"]),
+    )
+
+    if not updated:
+        return jsonify({"error": "Unable to update profile."}), 400
+
+    student = get_student_by_cwid(cwid)
+    return jsonify({
+        "message": "Profile updated successfully.",
+        "student": student
+    }), 200
 
 # -------------------------------
 # POST: /api/join-queue
