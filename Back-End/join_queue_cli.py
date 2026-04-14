@@ -17,6 +17,11 @@ Flow:
     7. Add the request to the queue
     8. Show queue position
 """
+# loads environment variables form .env into the preocss environment during local development.
+# from dotenv import load_dotenv
+
+# after this runs, os.getenv("SMTP_HOST"), etc. can read values from .env
+# load_dotenv()
 
 # Import the queue engine pieces.
 from Priority_Queue import MeetingQueueManager, MeetingRequest, AlreadyWaitingError
@@ -270,7 +275,7 @@ def returning_student_flow(student: dict) -> bool:
     print("\nWelcome back! Please verify your identity.")
 
     # Prompt for school email and verify it matches the database record.
-    entered_email = prompt_email("Enter your school email for verification: ")
+    entered_email = prompt_email("Enter your school email for verification: ").lower()
 
     if school_email_matches_cwid(entered_email, student["cwid"] ):
         print("Email verified successfully.")
@@ -458,7 +463,7 @@ def main() -> None:
             counts = qm.queue_counts()
             print(f"\nCurrent queue counts:")
             print(f"DSL Queue: {counts['DSL']}")
-            print(f"Non-DSL Queue: {counts['Non_DSL']}")
+            print(f"Non-DSL Queue: {counts['Non-DSL']}")
             print(f"Total: {counts['Total']}")
 
         elif choice == "7":

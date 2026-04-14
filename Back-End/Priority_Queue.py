@@ -77,6 +77,11 @@ class MeetingRequest:
     """
     Stores akk information about one meeting request.
     THis object represents one student waiting in the system.
+
+    - queue_id identifies which professor/queue this request belongs to
+    - session_id identifies which office-hours session it belongs to
+    - served_at and cancelled_at preserve historical timestamps
+    - near_front_notified prevents duplicate near-front notifications
     """
 
     student_id: str       # Unique studen identifier (In our case CWID)
@@ -90,6 +95,10 @@ class MeetingRequest:
     group_ok: bool = False          # Whether student allows grouping
     notification_ok:bool = False    # Student's full name
     is_dsl_queue: bool = False            # Wether student is in DSL priority tier
+
+     # each request now belongs to one queue and one session
+    queue_id: int = 0
+    session_id: int = 0
 
     request_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     # Automatically generates a unique ID string when created.
@@ -110,6 +119,18 @@ class MeetingRequest:
     
     notes: str = ""
     # For Professors and TA's to add custom notes.
+
+    # lifecycle timestamps
+    served_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+
+    # used to prevent repeated near-front notifications
+    near_front_notified: bool = False
+
+
+# -------------------------------------------------------------------
+# Core Queue Manager
+# ----------------------------------------------------------------
 
     @property
     # Returns a formatted time (HH:MM:SS) for display purposes.
