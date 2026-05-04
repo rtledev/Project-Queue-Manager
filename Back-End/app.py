@@ -15,7 +15,12 @@ from flask_cors import CORS
 from Priority_Queue import MeetingQueueManager, MeetingRequest, AlreadyWaitingError
 
 # Initialize the student database schema needed for account creation/login
-from student_db import initialize_student_db, create_student_account, authenticate_student
+from student_db import (
+    initialize_student_db,
+    create_student_account,
+    create_professor_account,
+    authenticate_student,
+)
 
 # Create the Flask application instance.
 # __name__ tells Flask where this file is located.
@@ -44,16 +49,35 @@ OFFICE_HOURS = [
         "name": "Professor Jones",
         "role": "Professor",
         "subtitle": "Office Hours",
-        "status": "Open"
+        "status": "Open",
+        "time": "Mon / Wed • 2:00 PM - 4:00 PM",
+        "location": "CS Building Room 201",
+        "meetingType": "General course questions",
+        "description": "Get help with lectures, assignments, and general course concepts."
     },
     {
         "id": 2,
         "name": "TA Smith",
         "role": "TA",
         "subtitle": "Lab Help",
-        "status": "Open"
+        "status": "Open",
+        "time": "Tue / Thu • 1:00 PM - 3:00 PM",
+        "location": "Zoom / Lab Support",
+        "meetingType": "Lab and coding help",
+        "description": "Best for implementation questions, debugging, and lab assignment support."
     }
 ]
+
+def dashboard_access_allowed(request_data) -> bool:
+    """
+    Checks whether the provided request payload belongs to a professor account.
+
+    For this prototype, the frontend sends the current signed-in account role.
+    """
+    if not request_data:
+        return False
+
+    return str(request_data.get("role", "")).strip().lower() == "professor"
 
 
 # -------------------------------
@@ -94,37 +118,64 @@ def get_office_hours():
 # -------------------------------
 # POST: /api/auth/signup
 # -------------------------------
-# This endpoint creates or completes a student account.
+# This endpoint creates either:
+# - a student account using a valid dummy CWID
+# - a professor account using a generated internal ID
 @app.post("/api/auth/signup")
 def auth_signup():
 
     # Extract JSON data sent from the frontend.
     data = request.get_json()
 
-    # Required fields for signup.
-    required_fields = [
-        "cwid",
+    # Role defaults to student if not provided.
+    role = str(data.get("role", "student")).strip().lower()
+
+    # Shared required fields for all account types.
+    common_required_fields = [
         "first_name",
         "last_name",
         "school_email",
         "password",
     ]
 
-    # Validate required fields.
-    for field in required_fields:
+    for field in common_required_fields:
         if field not in data or str(data[field]).strip() == "":
             return jsonify({"error": f"Missing required field: {field}"}), 400
+
+    contact_email = str(data.get("contact_email", "")).strip()
+    if contact_email == "":
+        contact_email = data["school_email"]
+
+    # Professor account flow.
+    if role == "professor":
+        account = create_professor_account(
+            first_name=data["first_name"].strip(),
+            middle_initial=str(data.get("middle_initial", "")).strip(),
+            last_name=data["last_name"].strip(),
+            school_email=data["school_email"].strip(),
+            contact_email=contact_email,
+            phone_number=str(data.get("phone_number", "")).strip(),
+            password=data["password"],
+        )
+
+        if account is None:
+            return jsonify({"error": "Unable to create professor account."}), 400
+
+        return jsonify({
+            "message": "Professor account created successfully.",
+            "student": account
+        }), 201
+
+    # Student account flow.
+    if "cwid" not in data or str(data["cwid"]).strip() == "":
+        return jsonify({"error": "Missing required field: cwid"}), 400
 
     try:
         cwid = int(data["cwid"])
     except ValueError:
         return jsonify({"error": "CWID must be numeric."}), 400
 
-    contact_email = str(data.get("contact_email", "")).strip()
-    if contact_email == "":
-        contact_email = data["school_email"]
-
-    student = create_student_account(
+    account = create_student_account(
         cwid=cwid,
         first_name=data["first_name"].strip(),
         middle_initial=str(data.get("middle_initial", "")).strip(),
@@ -134,16 +185,17 @@ def auth_signup():
         phone_number=str(data.get("phone_number", "")).strip(),
         dsl_status=bool(data.get("dsl_status", False)),
         password=data["password"],
+        role="student",
     )
 
-    if student is None:
+    if account is None:
         return jsonify({
             "error": "Unable to create account. Make sure the CWID exists in the system."
         }), 400
 
     return jsonify({
         "message": "Account created successfully.",
-        "student": student
+        "student": account
     }), 201
 
 
@@ -187,12 +239,19 @@ def auth_login():
 # -------------------------------
 # GET: /api/profile/<cwid>
 # -------------------------------
-# This endpoint returns one student's saved profile information.
-@app.get("/api/profile/<int:cwid>")
+# This endpoint returns one account's saved profile information.
+# cwid is accepted as a string first so professor accounts using
+# generated negative IDs can still be handled correctly.
+@app.get("/api/profile/<cwid>")
 def get_profile(cwid):
     from student_db import get_student_by_cwid
 
-    student = get_student_by_cwid(cwid)
+    try:
+        cwid_value = int(cwid)
+    except ValueError:
+        return jsonify({"error": "Invalid account ID."}), 400
+
+    student = get_student_by_cwid(cwid_value)
 
     if student is None:
         return jsonify({"error": "Student not found."}), 404
@@ -249,6 +308,50 @@ def update_profile():
         "message": "Profile updated successfully.",
         "student": student
     }), 200
+
+# -------------------------------
+# POST: /api/dashboard/create-office-hours
+# -------------------------------
+# This endpoint allows professor accounts to create a new office-hours session.
+@app.post("/api/dashboard/create-office-hours")
+def create_office_hours():
+    data = request.get_json()
+
+    if not dashboard_access_allowed(data):
+        return jsonify({"error": "Professor access required."}), 403
+
+    required_fields = [
+        "name",
+        "hostRole",
+        "subtitle",
+        "time",
+        "location",
+        "meetingType",
+        "description",
+    ]
+
+    for field in required_fields:
+        if field not in data or str(data[field]).strip() == "":
+            return jsonify({"error": f"Missing required field: {field}"}), 400
+
+    new_session = {
+        "id": len(OFFICE_HOURS) + 1,
+        "name": str(data["name"]).strip(),
+        "role": str(data["hostRole"]).strip(),
+        "subtitle": str(data["subtitle"]).strip(),
+        "status": "Open",
+        "time": str(data["time"]).strip(),
+        "location": str(data["location"]).strip(),
+        "meetingType": str(data["meetingType"]).strip(),
+        "description": str(data["description"]).strip(),
+    }
+
+    OFFICE_HOURS.append(new_session)
+
+    return jsonify({
+        "message": "Office hours session created successfully.",
+        "session": new_session
+    }), 201
 
 # -------------------------------
 # POST: /api/join-queue
@@ -359,22 +462,31 @@ def get_position(student_id):
 # GET: /api/dashboard/queue-counts
 # -------------------------------
 # This endpoint returns the current queue counts for dashboard display.
-@app.get("/api/dashboard/queue-counts")
+@app.post("/api/dashboard/queue-counts")
 def dashboard_queue_counts():
-    return jsonify(qm.queue_counts())
+    data = request.get_json()
 
+    if not dashboard_access_allowed(data):
+        return jsonify({"error": "Professor access required."}), 403
+
+    return jsonify(qm.queue_counts())
 
 # -------------------------------
 # GET: /api/dashboard/queue
 # -------------------------------
 # This endpoint returns the current merged queue in service order.
-@app.get("/api/dashboard/queue")
+@app.post("/api/dashboard/queue")
 def dashboard_queue():
+    data = request.get_json()
+
+    if not dashboard_access_allowed(data):
+        return jsonify({"error": "Professor access required."}), 403
+
     merged = qm.merged_queue()
 
-    data = []
+    data_out = []
     for req in merged:
-        data.append({
+        data_out.append({
             "request_id": req.request_id,
             "student_id": req.student_id,
             "student_name": req.student_name,
@@ -385,15 +497,20 @@ def dashboard_queue():
             "joined_at": req.formatted_time,
         })
 
-    return jsonify(data)
+    return jsonify(data_out)
 
 
 # -------------------------------
 # GET: /api/dashboard/next-student
 # -------------------------------
 # This endpoint returns the next student who would be served.
-@app.get("/api/dashboard/next-student")
+@app.post("/api/dashboard/next-student")
 def dashboard_next_student():
+    data = request.get_json()
+
+    if not dashboard_access_allowed(data):
+        return jsonify({"error": "Professor access required."}), 403
+
     next_request = qm.peek_next()
 
     if next_request is None:
@@ -410,13 +527,17 @@ def dashboard_next_student():
         "joined_at": next_request.formatted_time,
     })
 
-
 # -------------------------------
 # POST: /api/dashboard/serve-next
 # -------------------------------
 # This endpoint removes and returns the next student in the queue.
 @app.post("/api/dashboard/serve-next")
 def dashboard_serve_next():
+    data = request.get_json()
+
+    if not dashboard_access_allowed(data):
+        return jsonify({"error": "Professor access required."}), 403
+
     served_request = qm.dequeue_next()
 
     if served_request is None:

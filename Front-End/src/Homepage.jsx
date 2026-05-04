@@ -146,6 +146,10 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
             setJoinMessage("Please log in or create an account before joining the queue.");
             return;
         }
+        if (currentStudent.role === "professor") {
+            setJoinMessage("Professor accounts cannot join the student queue.");
+            return;
+        }
 
         try {
             setJoinMessage("");
@@ -273,12 +277,6 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
                                 Home
                             </button>
 
-                            {/* Placeholder navigation button */}
-                            <button className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100">
-                                <span className="text-base">🕒</span>
-                                Office Hours
-                            </button>
-
                             {/*
                             Profile navigation button.
                             Clicking this button calls onOpenProfile.
@@ -310,7 +308,7 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
                         <div>
                             <h2 className="text-3xl font-bold tracking-tight text-slate-900">Welcome to Ps &amp; Qs</h2>
                             <p className="mt-2 max-w-2xl text-sm text-slate-500 md:text-base">
-                                Join office hours, view available staff, and keep track of your queue position in one place.
+                                Browse office hours, review session details, join the queue, and track your position in one place.
                             </p>
 
                             {/*
@@ -370,21 +368,19 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
                             </button>
 
                             {/*
-                              Clicking this button calls onOpenDashboard.
-                              onOpenDashboard is provided by the parent component and changes
-                              the current page to the professor / TA dashboard.
+                            Only professor accounts should see the dashboard button,
+                            since the dashboard contains student queue information meant for staff use.
                             */}
-                            <button
-                                onClick={onOpenDashboard}
-                                className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                            >
-                                Open Dashboard
-                            </button>
+                            {currentStudent?.role === "professor" && (
+                                <button
+                                    onClick={onOpenDashboard}
+                                    className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                >
+                                    Open Dashboard
+                                </button>
+                            )}
 
-                            {/* Placeholder button for future onboarding or registration flow */}
-                            <button className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
-                                Get Started
-                            </button>
+
                         </div>
                     </div>
 
@@ -407,6 +403,8 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
                             loading={loading}
                             error={error}
                             onJoinQueue={handleJoinQueue}
+                            currentStudent={currentStudent}
+                            queueStatus={queueStatus}
                         />
 
                         {/* Right column: queue status and informational cards */}
@@ -525,7 +523,24 @@ export default function PsNQsHomepage() {
       onBack is passed down so DashboardPage can switch the page back to "home".
     */
     if (page === "dashboard") {
-        return <DashboardPage onBack={() => setPage("home")} />;
+        if (currentStudent?.role !== "professor") {
+            return (
+                <HomePage
+                    onLogin={() => setPage("login")}
+                    onOpenDashboard={() => setPage("dashboard")}
+                    onOpenProfile={() => setPage("profile")}
+                    currentStudent={currentStudent}
+                    onLogout={handleLogout}
+                />
+            );
+        }
+
+        return (
+            <DashboardPage
+                onBack={() => setPage("home")}
+                currentStudent={currentStudent}
+            />
+        );
     }
 
     /*

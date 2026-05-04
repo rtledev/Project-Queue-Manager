@@ -43,6 +43,7 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
         phone_number: "",
         dsl_status: false,
         password: "",
+        role: "student",
     });
 
     /*
@@ -154,8 +155,8 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
                             <button
                                 onClick={() => setMode("login")}
                                 className={`flex-1 rounded-2xl px-4 py-2 text-sm font-medium ${mode === "login"
-                                        ? "bg-white text-slate-900 shadow-sm"
-                                        : "text-slate-600"
+                                    ? "bg-white text-slate-900 shadow-sm"
+                                    : "text-slate-600"
                                     }`}
                             >
                                 Log In
@@ -163,8 +164,8 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
                             <button
                                 onClick={() => setMode("signup")}
                                 className={`flex-1 rounded-2xl px-4 py-2 text-sm font-medium ${mode === "signup"
-                                        ? "bg-white text-slate-900 shadow-sm"
-                                        : "text-slate-600"
+                                    ? "bg-white text-slate-900 shadow-sm"
+                                    : "text-slate-600"
                                     }`}
                             >
                                 Sign Up
@@ -227,19 +228,50 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
                             </form>
                         ) : (
                             <form className="space-y-5" onSubmit={handleSignupSubmit}>
-                                <div>
-                                    <label className="mb-2 block text-sm font-medium text-slate-700">CWID</label>
-                                    <input
-                                        type="text"
-                                        value={signupForm.cwid}
-                                        onChange={(e) =>
-                                            setSignupForm({ ...signupForm, cwid: e.target.value })
-                                        }
-                                        placeholder="12345678"
-                                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
-                                    />
-                                </div>
+                                {/*
+  CWID is only required for student accounts.
 
+  If the user is signing up as a professor / TA,
+  this field is hidden because professor accounts use a generated internal ID instead.
+*/}
+                                {signupForm.role === "student" && (
+                                    <div>
+                                        <label className="mb-2 block text-sm font-medium text-slate-700">CWID</label>
+                                        <input
+                                            type="text"
+                                            value={signupForm.cwid}
+                                            onChange={(e) =>
+                                                setSignupForm({ ...signupForm, cwid: e.target.value })
+                                            }
+                                            placeholder="12345678"
+                                            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                        />
+                                    </div>
+                                )}
+                                <form className="space-y-5" onSubmit={handleSignupSubmit}></form>
+                                {/*
+                                Professor / TA role checkbox.
+
+                                If checked, this signup will create a professor account instead of a student account.
+                                For the current prototype:
+                                - professor accounts do not need a CWID
+                                - professor accounts do not use the DSL student option
+                                */}
+                                <div className="flex items-center gap-2 text-sm text-slate-600">
+                                    <input
+                                        type="checkbox"
+                                        checked={signupForm.role === "professor"}
+                                        onChange={(e) =>
+                                            setSignupForm({
+                                                ...signupForm,
+                                                role: e.target.checked ? "professor" : "student",
+                                                dsl_status: e.target.checked ? false : signupForm.dsl_status,
+                                                cwid: e.target.checked ? "" : signupForm.cwid,
+                                            })
+                                        }
+                                    />
+                                    I am signing up as a professor / TA
+                                </div>
                                 <div>
                                     <label className="mb-2 block text-sm font-medium text-slate-700">First Name</label>
                                     <input
@@ -315,16 +347,24 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
                                     />
                                 </div>
 
-                                <div className="flex items-center gap-2 text-sm text-slate-600">
-                                    <input
-                                        type="checkbox"
-                                        checked={signupForm.dsl_status}
-                                        onChange={(e) =>
-                                            setSignupForm({ ...signupForm, dsl_status: e.target.checked })
-                                        }
-                                    />
-                                    DSL Student
-                                </div>
+                                {/*
+                                DSL status only applies to student accounts.
+
+                                If the user is signing up as a professor / TA,
+                                this option is hidden.
+                                */}
+                                {signupForm.role === "student" && (
+                                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                                        <input
+                                            type="checkbox"
+                                            checked={signupForm.dsl_status}
+                                            onChange={(e) =>
+                                                setSignupForm({ ...signupForm, dsl_status: e.target.checked })
+                                            }
+                                        />
+                                        DSL Student
+                                    </div>
+                                )}
 
                                 <div>
                                     <label className="mb-2 block text-sm font-medium text-slate-700">Password</label>

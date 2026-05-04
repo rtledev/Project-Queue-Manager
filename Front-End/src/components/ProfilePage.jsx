@@ -18,6 +18,9 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
 
       message stores success/error feedback shown to the user.
 
+      messageType helps style the feedback message differently depending on whether
+      it is a success message or an error message.
+
       isEditing controls whether the page is in read-only mode or edit mode.
 
       formData stores the editable values when the user is changing their profile.
@@ -25,6 +28,7 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
     const [message, setMessage] = useState("");
+    const [messageType, setMessageType] = useState("success");
     const [isEditing, setIsEditing] = useState(false);
     const [formData, setFormData] = useState({
         cwid: "",
@@ -46,6 +50,7 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
     useEffect(() => {
         async function loadProfile() {
             if (!currentStudent?.cwid) {
+                setMessageType("error");
                 setMessage("No student is currently signed in.");
                 setLoading(false);
                 return;
@@ -59,7 +64,14 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                     `http://127.0.0.1:5000/api/profile/${currentStudent.cwid}`
                 );
 
-                const data = await response.json();
+                const rawText = await response.text();
+
+                let data;
+                try {
+                    data = JSON.parse(rawText);
+                } catch {
+                    throw new Error("The profile response was not valid JSON.");
+                }
 
                 if (!response.ok) {
                     throw new Error(data.error || "Failed to load profile.");
@@ -67,7 +79,9 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
 
                 setProfile(data);
                 setFormData(data);
+                setMessage("");
             } catch (err) {
+                setMessageType("error");
                 setMessage(err.message || "Something went wrong while loading the profile.");
             } finally {
                 setLoading(false);
@@ -78,7 +92,23 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
     }, [currentStudent]);
 
     /*
+      handleInputChange updates one field inside formData whenever the user types.
+
+      This keeps the form controlled by React state.
+    */
+    function handleInputChange(event) {
+        const { name, value } = event.target;
+        setFormData({
+            ...formData,
+            [name]: value,
+        });
+    }
+
+    /*
       handleSaveProfile sends the updated editable profile fields to the backend.
+
+      Before sending the request, this function performs a small amount of
+      frontend validation so the user gets quicker feedback.
 
       If the update succeeds:
       - local profile state is refreshed
@@ -88,6 +118,25 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
     */
     async function handleSaveProfile(event) {
         event.preventDefault();
+
+        // Small frontend validation for required editable fields.
+        if (formData.first_name.trim() === "") {
+            setMessageType("error");
+            setMessage("First name cannot be empty.");
+            return;
+        }
+
+        if (formData.last_name.trim() === "") {
+            setMessageType("error");
+            setMessage("Last name cannot be empty.");
+            return;
+        }
+
+        if (formData.contact_email.trim() === "") {
+            setMessageType("error");
+            setMessage("Contact email cannot be empty.");
+            return;
+        }
 
         try {
             setMessage("");
@@ -109,13 +158,25 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
             setProfile(data.student);
             setFormData(data.student);
             setIsEditing(false);
+            setMessageType("success");
             setMessage("Profile updated successfully.");
 
             // Send the updated student back to the parent so homepage/app state stays current.
             onProfileUpdated(data.student);
         } catch (err) {
+            setMessageType("error");
             setMessage(err.message || "Something went wrong while updating the profile.");
         }
+    }
+
+    /*
+      handleCancelEdit restores the form fields back to the last saved profile values
+      and exits edit mode without saving changes.
+    */
+    function handleCancelEdit() {
+        setFormData(profile);
+        setIsEditing(false);
+        setMessage("");
     }
 
     return (
@@ -171,6 +232,19 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                             <p className="mt-2 max-w-2xl text-sm text-slate-500 md:text-base">
                                 View your saved student information and update editable contact details.
                             </p>
+
+                            {/*
+                              If a student is signed in, show their name and CWID as a small identity summary.
+                            */}
+                            {profile && (
+                                <p className="mt-3 text-sm text-slate-600">
+                                    Signed in as{" "}
+                                    <span className="font-medium text-slate-900">
+                                        {profile.first_name} {profile.last_name}
+                                    </span>{" "}
+                                    ({profile.cwid})
+                                </p>
+                            )}
                         </div>
 
                         <div className="flex gap-3">
@@ -183,7 +257,10 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
 
                             {!isEditing && profile && (
                                 <button
-                                    onClick={() => setIsEditing(true)}
+                                    onClick={() => {
+                                        setMessage("");
+                                        setIsEditing(true);
+                                    }}
                                     className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
                                 >
                                     Edit Profile
@@ -193,7 +270,12 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                     </div>
 
                     {message && (
-                        <div className="mb-6 rounded-2xl bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                        <div
+                            className={`mb-6 rounded-2xl px-4 py-3 text-sm ${messageType === "error"
+                                ? "bg-red-50 text-red-700"
+                                : "bg-blue-50 text-blue-700"
+                                }`}
+                        >
                             {message}
                         </div>
                     )}
@@ -209,6 +291,7 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                                     <label className="mb-2 block text-sm font-medium text-slate-700">CWID</label>
                                     <input
                                         type="text"
+                                        name="cwid"
                                         value={formData.cwid}
                                         disabled
                                         className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-500 outline-none"
@@ -219,6 +302,7 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                                     <label className="mb-2 block text-sm font-medium text-slate-700">School Email</label>
                                     <input
                                         type="email"
+                                        name="school_email"
                                         value={formData.school_email}
                                         disabled
                                         className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-500 outline-none"
@@ -229,8 +313,9 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                                     <label className="mb-2 block text-sm font-medium text-slate-700">First Name</label>
                                     <input
                                         type="text"
+                                        name="first_name"
                                         value={formData.first_name}
-                                        onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                                        onChange={handleInputChange}
                                         className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
                                     />
                                 </div>
@@ -239,8 +324,10 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                                     <label className="mb-2 block text-sm font-medium text-slate-700">Middle Initial</label>
                                     <input
                                         type="text"
+                                        name="middle_initial"
                                         value={formData.middle_initial}
-                                        onChange={(e) => setFormData({ ...formData, middle_initial: e.target.value })}
+                                        onChange={handleInputChange}
+                                        maxLength={1}
                                         className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
                                     />
                                 </div>
@@ -249,8 +336,9 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                                     <label className="mb-2 block text-sm font-medium text-slate-700">Last Name</label>
                                     <input
                                         type="text"
+                                        name="last_name"
                                         value={formData.last_name}
-                                        onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                                        onChange={handleInputChange}
                                         className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
                                     />
                                 </div>
@@ -259,8 +347,9 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                                     <label className="mb-2 block text-sm font-medium text-slate-700">Contact Email</label>
                                     <input
                                         type="email"
+                                        name="contact_email"
                                         value={formData.contact_email}
-                                        onChange={(e) => setFormData({ ...formData, contact_email: e.target.value })}
+                                        onChange={handleInputChange}
                                         className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
                                     />
                                 </div>
@@ -269,8 +358,9 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                                     <label className="mb-2 block text-sm font-medium text-slate-700">Phone Number</label>
                                     <input
                                         type="text"
+                                        name="phone_number"
                                         value={formData.phone_number}
-                                        onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+                                        onChange={handleInputChange}
                                         className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
                                     />
                                 </div>
@@ -296,11 +386,7 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
 
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        setFormData(profile);
-                                        setIsEditing(false);
-                                        setMessage("");
-                                    }}
+                                    onClick={handleCancelEdit}
                                     className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
                                 >
                                     Cancel

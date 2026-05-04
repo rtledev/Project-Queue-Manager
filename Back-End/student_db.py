@@ -38,6 +38,7 @@ def create_students_table():
         contact_email  -> preferred email for reminders/contact
         phone_number   -> optional phone number
         dsl_status     -> 1 for True, 0 for False
+        role           -> student / teacher
     """
     # Open a connection to the database.
     conn = get_connection()
@@ -55,7 +56,8 @@ def create_students_table():
             school_email TEXT,
             contact_email TEXT,
             phone_number TEXT,
-            dsl_status INTEGER NOT NULL DEFAULT 0
+            dsl_status INTEGER NOT NULL DEFAULT 0,
+            role TEXT NOT NULL DEFAULT 'student'
         )
     """)
 
@@ -81,6 +83,9 @@ def ensure_auth_columns() -> None:
     if "password_hash" not in columns:
         cursor.execute("ALTER TABLE students ADD COLUMN password_hash TEXT")
 
+     # Add role only if it does not already exist.
+    if "role" not in columns:
+        cursor.execute("ALTER TABLE students ADD COLUMN role TEXT NOT NULL DEFAULT 'student'")
     conn.commit()
     conn.close()
 
@@ -120,9 +125,10 @@ def insert_placeholder_student(cwid: int) -> None:
             school_email,
             contact_email,
             phone_number,
-            dsl_status
+            dsl_status,
+            role
         )
-        VALUES (?, '', '', '', '', '', '', 0)
+        VALUES (?, '', '', '', '', '', '', 0, 'student')
     """, (cwid,))
 
     conn.commit()
@@ -165,7 +171,8 @@ def get_student_by_cwid(cwid: int) -> Optional[dict]:
             school_email,
             contact_email,
             phone_number,
-            dsl_status
+            dsl_status,
+            role
         FROM students
         WHERE cwid = ?
     """, (cwid,))
@@ -184,6 +191,7 @@ def get_student_by_cwid(cwid: int) -> Optional[dict]:
             "contact_email": row[5],
             "phone_number": row[6],
             "dsl_status": bool(row[7]),  # Convert integer to boolean.
+            "role": row[8],
         }
     else:
         return None
@@ -198,6 +206,7 @@ def update_student_info(
     contact_email: str,
     phone_number: str,
     dsl_status: bool,
+    role: str = "student",
 ) -> bool:
     """
     Updates a student's information in the database after CWID has been validated.
@@ -225,7 +234,8 @@ def update_student_info(
             school_email = ?,
             contact_email = ?,
             phone_number = ?,
-            dsl_status = ?
+            dsl_status = ?,
+            role = ?
         WHERE cwid = ?
     """, (
         first_name,
@@ -235,6 +245,7 @@ def update_student_info(
         contact_email,
         phone_number,
         int(dsl_status),  # Convert True/False to 1/0 for SQLite storage.
+        role,
         cwid,
     ))
 
@@ -373,6 +384,7 @@ def create_student_account(
     phone_number: str,
     dsl_status: bool,
     password: str,
+    role: str = "student",
 ) -> Optional[dict]:
     """
     Creates or completes a student account using an existing valid CWID.
@@ -443,3 +455,82 @@ def authenticate_student(cwid: int, school_email: str, password: str) -> Optiona
         return None
 
     return student
+
+# Professor account helper functions. 
+
+def get_next_professor_id() -> int:
+    """
+    Generates the next available negative ID for professor accounts.
+
+    Student demo CWIDs are positive numbers, so using negative values keeps
+    professor IDs separate without requiring a real CWID.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT MIN(cwid) FROM students")
+    row = cursor.fetchone()
+    conn.close()
+
+    min_id = row[0] if row and row[0] is not None else 0
+
+    if min_id >= 0:
+        return -1
+
+    return min_id - 1
+
+
+def create_professor_account(
+    first_name: str,
+    middle_initial: str,
+    last_name: str,
+    school_email: str,
+    contact_email: str,
+    phone_number: str,
+    password: str,
+) -> Optional[dict]:
+    """
+    Creates a professor account without requiring a CWID.
+
+    For the current prototype, professor accounts use internally generated
+    negative IDs instead of real employee/university identifiers.
+    """
+    cwid = get_next_professor_id()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO students (
+            cwid,
+            first_name,
+            middle_initial,
+            last_name,
+            school_email,
+            contact_email,
+            phone_number,
+            dsl_status,
+            role
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        cwid,
+        first_name,
+        middle_initial,
+        last_name,
+        school_email,
+        contact_email,
+        phone_number,
+        0,
+        "professor",
+    ))
+
+    conn.commit()
+    conn.close()
+
+    password_set = set_student_password(cwid, password)
+
+    if not password_set:
+        return None
+
+    return get_student_by_cwid(cwid)
