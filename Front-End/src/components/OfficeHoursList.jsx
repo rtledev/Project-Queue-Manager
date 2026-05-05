@@ -118,8 +118,8 @@ export default function OfficeHoursList({
                                         onClick={() => onJoinQueue(person)}
                                         disabled={isStudentInQueue}
                                         className={`rounded-2xl px-4 py-2 text-sm font-medium text-white ${isStudentInQueue
-                                                ? "cursor-not-allowed bg-slate-400"
-                                                : "bg-blue-600 hover:bg-blue-700"
+                                            ? "cursor-not-allowed bg-slate-400"
+                                            : "bg-blue-600 hover:bg-blue-700"
                                             }`}
                                     >
                                         {isStudentInQueue ? "Already in Queue" : "Join Queue"}

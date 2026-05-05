@@ -9,7 +9,6 @@ import { useState } from "react";
 // onBack -> returns the user to the homepage
 // onLoginSuccess -> sends the authenticated student back to the parent component
 export default function LoginPage({ onBack, onLoginSuccess }) {
-
     /*
       mode controls whether the card is showing the login form
       or the sign-up form.
@@ -124,7 +123,7 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
                         <div className="space-y-2">
                             <button
                                 onClick={onBack}
-                                className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100"
+                                className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm text-slate-600 transition hover:bg-slate-100"
                             >
                                 <span className="text-base">🏠</span>
                                 Home
@@ -146,26 +145,27 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
                             </h2>
                             <p className="mt-2 text-sm text-slate-500">
                                 {mode === "login"
-                                    ? "Log in to join the queue with your saved student account."
-                                    : "Create an account so your queue requests use your real student information."}
+                                    ? "Log in to join the queue with your saved account."
+                                    : "Create an account so your queue requests use your real account information."}
                             </p>
                         </div>
 
                         <div className="mb-6 flex rounded-2xl bg-slate-100 p-1">
                             <button
                                 onClick={() => setMode("login")}
-                                className={`flex-1 rounded-2xl px-4 py-2 text-sm font-medium ${mode === "login"
-                                    ? "bg-white text-slate-900 shadow-sm"
-                                    : "text-slate-600"
+                                className={`flex-1 rounded-2xl px-4 py-2 text-sm font-medium transition ${mode === "login"
+                                    ? "bg-white text-slate-900 shadow-sm hover:bg-slate-50"
+                                    : "text-slate-600 hover:bg-slate-200"
                                     }`}
                             >
                                 Log In
                             </button>
+
                             <button
                                 onClick={() => setMode("signup")}
-                                className={`flex-1 rounded-2xl px-4 py-2 text-sm font-medium ${mode === "signup"
-                                    ? "bg-white text-slate-900 shadow-sm"
-                                    : "text-slate-600"
+                                className={`flex-1 rounded-2xl px-4 py-2 text-sm font-medium transition ${mode === "signup"
+                                    ? "bg-white text-slate-900 shadow-sm hover:bg-slate-50"
+                                    : "text-slate-600 hover:bg-slate-200"
                                     }`}
                             >
                                 Sign Up
@@ -181,7 +181,7 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
                         {mode === "login" ? (
                             <form className="space-y-5" onSubmit={handleLoginSubmit}>
                                 <div>
-                                    <label className="mb-2 block text-sm font-medium text-slate-700">CWID</label>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">CWID / Account ID</label>
                                     <input
                                         type="text"
                                         value={loginForm.cwid}
@@ -221,7 +221,7 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
 
                                 <button
                                     type="submit"
-                                    className="w-full rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+                                    className="w-full rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700"
                                 >
                                     Log In
                                 </button>
@@ -229,33 +229,12 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
                         ) : (
                             <form className="space-y-5" onSubmit={handleSignupSubmit}>
                                 {/*
-  CWID is only required for student accounts.
+                                  Professor / TA role checkbox.
 
-  If the user is signing up as a professor / TA,
-  this field is hidden because professor accounts use a generated internal ID instead.
-*/}
-                                {signupForm.role === "student" && (
-                                    <div>
-                                        <label className="mb-2 block text-sm font-medium text-slate-700">CWID</label>
-                                        <input
-                                            type="text"
-                                            value={signupForm.cwid}
-                                            onChange={(e) =>
-                                                setSignupForm({ ...signupForm, cwid: e.target.value })
-                                            }
-                                            placeholder="12345678"
-                                            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
-                                        />
-                                    </div>
-                                )}
-                                <form className="space-y-5" onSubmit={handleSignupSubmit}></form>
-                                {/*
-                                Professor / TA role checkbox.
-
-                                If checked, this signup will create a professor account instead of a student account.
-                                For the current prototype:
-                                - professor accounts do not need a CWID
-                                - professor accounts do not use the DSL student option
+                                  If checked, this signup will create a professor account instead of a student account.
+                                  For the current prototype:
+                                  - professor accounts do not need a CWID
+                                  - professor accounts do not use the DSL student option
                                 */}
                                 <div className="flex items-center gap-2 text-sm text-slate-600">
                                     <input
@@ -272,6 +251,28 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
                                     />
                                     I am signing up as a professor / TA
                                 </div>
+
+                                {/*
+                                  CWID is only required for student accounts.
+
+                                  If the user is signing up as a professor / TA,
+                                  this field is hidden because professor accounts use a generated internal ID instead.
+                                */}
+                                {signupForm.role === "student" && (
+                                    <div>
+                                        <label className="mb-2 block text-sm font-medium text-slate-700">CWID</label>
+                                        <input
+                                            type="text"
+                                            value={signupForm.cwid}
+                                            onChange={(e) =>
+                                                setSignupForm({ ...signupForm, cwid: e.target.value })
+                                            }
+                                            placeholder="12345678"
+                                            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                        />
+                                    </div>
+                                )}
+
                                 <div>
                                     <label className="mb-2 block text-sm font-medium text-slate-700">First Name</label>
                                     <input
@@ -348,10 +349,10 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
                                 </div>
 
                                 {/*
-                                DSL status only applies to student accounts.
+                                  DSL status only applies to student accounts.
 
-                                If the user is signing up as a professor / TA,
-                                this option is hidden.
+                                  If the user is signing up as a professor / TA,
+                                  this option is hidden.
                                 */}
                                 {signupForm.role === "student" && (
                                     <div className="flex items-center gap-2 text-sm text-slate-600">
@@ -381,7 +382,7 @@ export default function LoginPage({ onBack, onLoginSuccess }) {
 
                                 <button
                                     type="submit"
-                                    className="w-full rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+                                    className="w-full rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700"
                                 >
                                     Create Account
                                 </button>
