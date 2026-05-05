@@ -24,6 +24,7 @@ import time
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from typing import Optional
+from pathlib import Path
 
 # Optional: load .env here instead of main startup if you want this file to be self-contained.
 # Make dotenv optional so the program does not crash if the package is missing.
@@ -36,6 +37,10 @@ except ImportError:
         This lets the rest of the program still run.
         """
         pass
+
+# Load .env from the same folder as this file.
+ENV_PATH = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=ENV_PATH)
 
 from Priority_Queue import MeetingRequest
 from queue_db import (

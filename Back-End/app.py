@@ -17,6 +17,8 @@ from Priority_Queue import MeetingQueueManager, MeetingRequest, AlreadyWaitingEr
 
 from notification_service import EmailNotifier, start_email_worker
 
+from queue_db import initialize_queue_storage
+
 
 # Initialize the student database schema needed for account creation/login
 from student_db import (
@@ -45,6 +47,7 @@ qm = MeetingQueueManager()
 from seed_student import seed_dummy_students
 initialize_student_db()
 seed_dummy_students()
+initialize_queue_storage()
 
 # Create the email notifier service.
 notifier = EmailNotifier()
@@ -641,8 +644,6 @@ def dashboard_serve_next():
     if served_request.notification_ok:
         notifier.queue_now_serving_email(served_request)
 
-    # After removing the served student, check whether anyone else is now near the front.
-    check_near_front_notifications()
 
 
     return jsonify({
