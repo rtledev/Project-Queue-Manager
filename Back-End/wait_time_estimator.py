@@ -15,35 +15,17 @@ from Priority_Queue import MeetingRequest
 MIN_MINUTES_PER_PERSON = 7
 MAX_MINUTES_PER_PERSON = 12
 
-def build_wait_time_estimate(merged_queue: List[MeetingRequest]) -> Dict[str, dict]:
-    # Builds an estimated wait time for every student in the queue
-    # Returns a dict of requested_id -> estimated info
+def build_wait_time_estimates( merged_queue: List[MeetingRequest]) -> Dict[str, int]:
+        # Builds an estimated wait time for every student in the queue
+        # Returns a dict of requested_id -> estimated info
 
-    estimate = {}
-    cumulative_minutes = 0
+        estimates = {}
 
-    for position, req in enumerate(merged_queue, start=1):
-        service_minutes = random.randint(
-            MIN_MINUTES_PER_PERSON,
-            MAX_MINUTES_PER_PERSON
-        )
+        cumulative_minutes = 0
 
-        cumulative_minutes += service_minutes
+        for req in merged_queue:
+            cumulative_minutes += req.estimated_service_minutes
 
-        if position == 1:
-            message = (
-                f"You are next. Please be ready. "
-                f"Estimated time: about {service_minutes} minutes."
-            )
-        else:
-            message = (
-                f"Estimated wait time: about {cumulative_minutes} minutes."
-                f"THis may be shorter or longer depending on each meeting."
-            )
+            estimates[req.request_id] = cumulative_minutes
 
-        estimate[req.request_id] = {
-            "position": position,
-            "estimated_minutes": cumulative_minutes,
-            "service_minutes": service_minutes,
-            "message": message,
-        }
+        return estimates

@@ -14,6 +14,9 @@ from flask_cors import CORS
 # AlreadyWaitingError -> custom error if a student is already in queue
 from Priority_Queue import MeetingQueueManager, MeetingRequest, AlreadyWaitingError
 
+# estimated time per person
+from wait_time_estimator import build_wait_time_estimates
+
 # Initialize the student database schema needed for account creation/login
 from student_db import (
     initialize_student_db,
@@ -397,12 +400,19 @@ def join_queue():
         # If student is already in queue, return 409 Conflict error.
         return jsonify({"error": "Student already has an active request."}), 409
 
+    merged = qm.merged_queue()
+
+    estimates = build_wait_time_estimates(merged)
+
+    estimated_wait = estimates.get(request_obj.request_id, 0)
     # If successful, return confirmation data.
     return jsonify({
         "message": "Joined queue successfully.",
         "request_id": request_obj.request_id,   # unique ID for this request
         "position": qm.get_position(str(data["student_id"])),  # current queue position
-        "joined_at": request_obj.formatted_time  # timestamp of join
+        "joined_at": request_obj.formatted_time,  # timestamp of join
+        "estimated_wait_minutes": estimated_wait,   # estimated time until next service 2+
+        "estimated_service_minutes": request_obj.estimated_service_minutes, # estimated time until next service for first person
     }), 201  # 201 = Created
 
 

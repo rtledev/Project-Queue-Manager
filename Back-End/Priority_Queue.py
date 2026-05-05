@@ -61,6 +61,9 @@ import uuid
 # Generates unique IDs.
 # We use this to create unique request IDs automatically.
 
+import random
+# random number generator
+
 
 #------------------------------------- Custom Errors ------------------------------------- #
 
@@ -132,6 +135,8 @@ class MeetingRequest:
 
     # used to prevent repeated near-front notifications
     near_front_notified: bool = False
+
+    estimated_service_minutes: int = 0
 
 
 # -------------------------------------------------------------------
@@ -272,6 +277,8 @@ class MeetingQueueManager:
         req.student_id = str(req.student_id)
         if req.student_id in self._active_requests_by_student:
             raise AlreadyWaitingError(f"Student '{req.student_id}' already has an active request.")
+        
+        req.estimated_service_minutes = random.randint(7, 12) # estimated time per person in queue added
         
         # 2. Increment the global join counter and assign join sequence number (FCFS tracking)
         self._join_counter += 1
