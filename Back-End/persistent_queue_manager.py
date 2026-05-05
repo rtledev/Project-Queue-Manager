@@ -101,7 +101,7 @@ class PersistMeetingQueueManager(MeetingQueueManager):
     
     def cancel_by_student(self, student_id: str, req: MeetingRequest = None) -> bool:
         """
-        Cancels request AND updates DB
+        Cancels request in memory AND updates DB
         """
         student_id = str(student_id)        # keeps consistent as string in queue logic
 
@@ -109,6 +109,12 @@ class PersistMeetingQueueManager(MeetingQueueManager):
         request_id = self._active_requests_by_student.get(student_id)
 
         if request_id is None:
+            return False
+        
+        # Get the actual request object before cancellation.
+        req = self.requests_by_id.get(request_id)
+
+        if req is None:
             return False
         
         # Step 1: Cancel in memory

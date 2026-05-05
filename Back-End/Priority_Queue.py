@@ -244,7 +244,7 @@ class MeetingQueueManager:
             self.requests_by_id[req.request_id] = req
 
             #Track active request by student.
-            self._active_requests_by_student[str(req.student_id)] = req.student_id
+            self._active_requests_by_student[str(req.student_id)] = req.request_id
 
             # Append the request ID to the correct queue based on its tier.
             self._tier(req).append(req.request_id)

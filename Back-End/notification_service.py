@@ -23,6 +23,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from typing import Optional
 
 # Optional: load .env here instead of main startup if you want this file to be self-contained.
 # Make dotenv optional so the program does not crash if the package is missing.
@@ -44,6 +45,7 @@ from queue_db import (
     mark_email_job_failed,
     get_request_by_id,
     update_near_front_notified,
+    get_waiting_requests,
 )
 
 # Load variables from .env so SMTP settings are not hardcoded.
@@ -119,10 +121,38 @@ class EmailNotifier:
             # Later this can be logged to a file or retry queue.
             print(f"Email failed: {e}")
             return False
-        
-# -------------------------------------------------------------------
-# Email templates → queued jobs
-# -------------------------------------------------------------------
+    
+    def get_current_position_from_db(self, request_id: str) -> Optional[int]:
+        """
+        Recalculates the student's current queue position from the database.
+
+        This prevents stale email positions.
+        """
+        req = get_request_by_id(request_id)
+
+        if req is None or req.status != "Waiting":
+            return None
+
+        waiting_requests = get_waiting_requests(
+            queue_id=req.queue_id,
+            session_id=req.session_id,
+        )
+
+        # Match your current queue rule:
+        # DSL first, then Non-DSL.
+        merged = (
+            [r for r in waiting_requests if r.is_dsl_queue]
+            + [r for r in waiting_requests if not r.is_dsl_queue]
+        )
+
+        for index, current_req in enumerate(merged, start=1):
+            if current_req.request_id == request_id:
+                return index
+
+        return None
+
+# -------------Email templates → queued jobs-------------------
+
 
     def queue_join_confirmation(self, req: MeetingRequest, position: int) -> bool:
         """
@@ -157,13 +187,17 @@ class EmailNotifier:
         subject = "Ps & Qs - You're Almost Up!"
 
         body = (
-            f"Hello {req.student_name},\n"
-            f"~~~~~~~~~~~~~~~~~~~~~"
+            f"Hello {req.student_name},\n\n"
+            f"====================================\n"
+            f"        Ps & Qs Queue Confirmation\n"
+            f"====================================\n\n"
             f"You are near the front of the waitlist.\n"
-            f"Joined at: {req.formatted_time}\n"
-            f"Position: {position}\n"
-            f"~~~~~~~~~~~~~~~~~~~~~"
-            f"Please be ready!"
+            f"Topic: {req.title}\n"
+            f"Current Position: {position}\n"
+            f"Joined at: {req.formatted_time}\n\n"
+            f"Please be ready!\n\n"
+            f"Thank you,\n"
+            
         )
 
         job_id = queue_email_job(
@@ -189,11 +223,15 @@ class EmailNotifier:
 
         body = (
             f"Hello {req.student_name},\n\n"
-            f"~~~~~~~~~~~~~~~~~~~~~"
-            f"It is now your turn.\n"
-            f"Topic: {req.title}\n\n"
-            f"~~~~~~~~~~~~~~~~~~~~~"
-            f"Please join the office hours now."
+            f"====================================\n"
+            f"        Ps & Qs Queue Confirmation\n"
+            f"====================================\n\n"
+            f"It is now your turn.\n\n"
+            f"Topic: {req.title}\n"
+            f"Joined at: {req.formatted_time}\n\n"
+            f"Please join the office hours now.\n\n"
+            f"Thank you,\n"
+            f"Ps & Qs Meeting Queue Manager\n"
         )
 
         return queue_email_job(
@@ -257,10 +295,34 @@ def process_due_email_jobs(notifier: EmailNotifier, limit: int = 10) -> None:
                 mark_email_job_sent(job["job_id"])
                 continue
 
+        # Start with stored body
+        body = job["body"]
+
+        # Dynamically update position-based emails BEFORE sending
+        if request_id and (
+            "Queue Confirmation" in job["subject"] or
+            "Almost Up" in job["subject"]
+        ):
+            req = get_request_by_id(request_id)
+            position = notifier.get_current_position_from_db(request_id)
+
+            if req is not None and position is not None:
+                body = (
+                    f"Hello {req.student_name},\n\n"
+                    f"==============================\n"
+                    f"Ps & Qs Queue Update\n"
+                    f"==============================\n\n"
+                    f"Topic: {req.title}\n"
+                    f"Current Position: {position}\n"
+                    f"Joined at: {req.formatted_time}\n\n"
+                    f"Please be ready when your turn is close.\n"
+                )
+
+        # Send email with UPDATED body
         success = notifier.send_email(
             to_email=job["recipient"],
             subject=job["subject"],
-            body=job["body"],
+            body=body,
         )
 
         if success:
