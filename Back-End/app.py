@@ -38,7 +38,9 @@ CORS(app)
 qm = MeetingQueueManager()
 
 # Initialize The student database needed for account creation/login
+from seed_student import seed_dummy_students
 initialize_student_db()
+seed_dummy_students()
 
 # Temporary mock data for office hours sessions.
 # Right now this is hardcoded.
