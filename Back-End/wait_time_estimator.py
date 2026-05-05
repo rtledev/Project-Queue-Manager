@@ -1,0 +1,49 @@
+"""
+wait_time_estimator.py
+
+Creates estimated wait times for students in the queue.
+- Each person is assigned a random estimated service time between 7-12 minutes.
+- Wait time is cumulative.
+- Position 1 means the student may be called soon, but we still show an estimated range/time :)
+"""
+
+import random
+from typing import Dict, List
+
+from Priority_Queue import MeetingRequest
+
+MIN_MINUTES_PER_PERSON = 7
+MAX_MINUTES_PER_PERSON = 12
+
+def build_wait_time_estimate(merged_queue: List[MeetingRequest]) -> Dict[str, dict]:
+    # Builds an estimated wait time for every student in the queue
+    # Returns a dict of requested_id -> estimated info
+
+    estimate = {}
+    cumulative_minutes = 0
+
+    for position, req in enumerate(merged_queue, start=1):
+        service_minutes = random.randint(
+            MIN_MINUTES_PER_PERSON,
+            MAX_MINUTES_PER_PERSON
+        )
+
+        cumulative_minutes += service_minutes
+
+        if position == 1:
+            message = (
+                f"You are next. Please be ready. "
+                f"Estimated time: about {service_minutes} minutes."
+            )
+        else:
+            message = (
+                f"Estimated wait time: about {cumulative_minutes} minutes."
+                f"THis may be shorter or longer depending on each meeting."
+            )
+
+        estimate[req.request_id] = {
+            "position": position,
+            "estimated_minutes": cumulative_minutes,
+            "service_minutes": service_minutes,
+            "message": message,
+        }
