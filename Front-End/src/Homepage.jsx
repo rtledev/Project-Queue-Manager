@@ -60,7 +60,7 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
             setStatusError("");
 
             const response = await fetch(
-                `https://project-queue-manager.onrender.com/api/queue/${studentId}/position`
+                `http://127.0.0.1:5000/api/queue/${studentId}/position`
             );
 
             const data = await response.json();
@@ -101,7 +101,7 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
                 setLoading(true);
                 setError("");
 
-                const response = await fetch("https://project-queue-manager.onrender.com/api/office-hours")
+                const response = await fetch("http://127.0.0.1:5000/api/office-hours");
 
                 if (!response.ok) {
                     throw new Error("Failed to fetch office hours.");
@@ -156,7 +156,7 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
             setJoinMessage("");
             setStatusError("");
 
-            const response = await fetch("https://project-queue-manager.onrender.com/api/join-queue", {
+            const response = await fetch("http://127.0.0.1:5000/api/join-queue", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -192,7 +192,7 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
               Refresh office-hours data after joining so the waiting counts shown on the page
               stay in sync with the backend.
             */
-            const refreshResponse = await fetch("https://project-queue-manager.onrender.com/api/office-hours");
+            const refreshResponse = await fetch("http://127.0.0.1:5000/api/office-hours");
             const refreshedData = await refreshResponse.json();
             setOfficeHours(refreshedData);
         } catch (err) {
@@ -221,7 +221,7 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
             setJoinMessage("");
             setStatusError("");
 
-            const response = await fetch("https://project-queue-manager.onrender.com/api/cancel-queue", {
+            const response = await fetch("http://127.0.0.1:5000/api/cancel-queue", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -244,7 +244,7 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
             setQueueStatus(null);
 
             // Refresh office-hours data so waiting counts stay in sync with the backend.
-            const refreshResponse = await fetch("https://project-queue-manager.onrender.com/api/office-hours");
+            const refreshResponse = await fetch("http://127.0.0.1:5000/api/office-hours");
             const refreshedData = await refreshResponse.json();
             setOfficeHours(refreshedData);
         } catch (err) {
