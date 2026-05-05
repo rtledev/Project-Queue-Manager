@@ -333,35 +333,35 @@ def process_due_email_jobs(notifier: EmailNotifier, limit: int = 10) -> None:
                 error_message="SMTP send failed",
                 retry_delay_seconds=60,
             )
-    def queue_join_confirmation(self, req: MeetingRequest, position: int, estimated_minutes: int = None) -> bool:
-        subject = "Ps & Qs - Queue Confirmation"
+def queue_join_confirmation(self, req: MeetingRequest, position: int, estimated_minutes: int = None) -> bool:
+    subject = "Ps & Qs - Queue Confirmation"
 
-        estimate_line = ""
-        if estimated_minutes is not None:
-            estimate_line = f"Estimated wait time: about {estimated_minutes} minutes\n"
+    estimate_line = ""
+    if estimated_minutes is not None:
+        estimate_line = f"Estimated wait time: about {estimated_minutes} minutes\n"
 
-        body = (
-            f"Hello {req.student_name},\n\n"
-            f"====================================\n"
-            f"Ps & Qs Queue Confirmation\n"
-            f"====================================\n\n"
-            f"You have successfully joined the queue.\n\n"
-            f"Position: {position}\n"
-            f"{estimate_line}"
-            f"Joined at: {req.formatted_time}\n"
-            f"Topic: {req.title}\n\n"
-            f"This is only an estimate and may change depending on each meeting.\n\n"
-            f"Thank you,\n"
-            f"Ps & Qs Meeting Queue Manager\n"
-        )
+    body = (
+        f"Hello {req.student_name},\n\n"
+        f"====================================\n"
+        f"Ps & Qs Queue Confirmation\n"
+        f"====================================\n\n"
+        f"You have successfully joined the queue.\n\n"
+        f"Position: {position}\n"
+        f"{estimate_line}"
+        f"Joined at: {req.formatted_time}\n"
+        f"Topic: {req.title}\n\n"
+        f"This is only an estimate and may change depending on each meeting.\n\n"
+        f"Thank you,\n"
+        f"Ps & Qs Meeting Queue Manager\n"
+    )
 
-        return queue_email_job(
-            recipient=req.email,
-            subject=subject,
-            body=body,
-            request_id=req.request_id,
-            scheduled_for=datetime.now(),
-        )
+    return queue_email_job(
+        recipient=req.email,
+        subject=subject,
+        body=body,
+        request_id=req.request_id,
+        scheduled_for=datetime.now(),
+    )
 
 def _email_worker_loop(notifier: EmailNotifier, poll_seconds: int) -> None:
     """
