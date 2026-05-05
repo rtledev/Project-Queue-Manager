@@ -78,6 +78,7 @@ function HomePage({ onLogin, onOpenDashboard, onOpenProfile, currentStudent, onL
               For this prototype, that is expected behavior and does not need to be
               shown as a visible red error message.
             */
+           console.error(err); // debug
             setQueueStatus(null);
             setStatusError("");
         }

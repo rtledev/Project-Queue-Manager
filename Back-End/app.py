@@ -42,7 +42,9 @@ CORS(app)
 qm = MeetingQueueManager()
 
 # Initialize The student database needed for account creation/login
+from seed_student import seed_dummy_students
 initialize_student_db()
+seed_dummy_students()
 
 # Create the email notifier service.
 notifier = EmailNotifier()

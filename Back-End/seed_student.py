@@ -27,6 +27,12 @@ DUMMY_CWIDS = [
     7012, 7186, 7324, 7459, 7683
 ]
 
+def seed_dummy_students() -> None:
+    initialize_student_db()
+
+    for cwid in DUMMY_CWIDS:
+        insert_placeholder_student(cwid)
+
 def main() -> None:
     """
     Creates the table, ensures auth columns exist,
