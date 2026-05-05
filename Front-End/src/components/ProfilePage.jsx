@@ -24,6 +24,7 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
       isEditing controls whether the page is in read-only mode or edit mode.
 
       formData stores the editable values when the user is changing their profile.
+      role is also stored here so it can be sent back to the backend during profile updates.
     */
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -39,6 +40,7 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
         contact_email: "",
         phone_number: "",
         dsl_status: false,
+        role: "student",
     });
 
     /*
@@ -230,11 +232,11 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                         <div>
                             <h2 className="text-3xl font-bold tracking-tight text-slate-900">Your Profile</h2>
                             <p className="mt-2 max-w-2xl text-sm text-slate-500 md:text-base">
-                                View your saved student information and update editable contact details.
+                                View your saved account information and update editable contact details.
                             </p>
 
                             {/*
-                              If a student is signed in, show their name and CWID as a small identity summary.
+                              If an account is signed in, show their name and ID as a small identity summary.
                             */}
                             {profile && (
                                 <p className="mt-3 text-sm text-slate-600">
@@ -288,7 +290,7 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                         <form onSubmit={handleSaveProfile} className="rounded-3xl bg-white p-6 shadow-sm">
                             <div className="grid gap-5 md:grid-cols-2">
                                 <div>
-                                    <label className="mb-2 block text-sm font-medium text-slate-700">CWID</label>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">CWID / Account ID</label>
                                     <input
                                         type="text"
                                         name="cwid"
@@ -366,6 +368,17 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                                 </div>
 
                                 <div>
+                                    <label className="mb-2 block text-sm font-medium text-slate-700">Role</label>
+                                    <input
+                                        type="text"
+                                        name="role"
+                                        value={formData.role === "professor" ? "Professor / TA" : "Student"}
+                                        disabled
+                                        className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-500 outline-none"
+                                    />
+                                </div>
+
+                                <div>
                                     <label className="mb-2 block text-sm font-medium text-slate-700">DSL Status</label>
                                     <input
                                         type="text"
@@ -396,13 +409,14 @@ export default function ProfilePage({ currentStudent, onBack, onProfileUpdated, 
                     ) : (
                         <section className="rounded-3xl bg-white p-6 shadow-sm">
                             <div className="grid gap-5 text-sm text-slate-600 md:grid-cols-2">
-                                <p><span className="font-medium text-slate-900">CWID:</span> {profile.cwid}</p>
+                                <p><span className="font-medium text-slate-900">CWID / Account ID:</span> {profile.cwid}</p>
                                 <p><span className="font-medium text-slate-900">School Email:</span> {profile.school_email}</p>
                                 <p><span className="font-medium text-slate-900">First Name:</span> {profile.first_name}</p>
                                 <p><span className="font-medium text-slate-900">Middle Initial:</span> {profile.middle_initial || "—"}</p>
                                 <p><span className="font-medium text-slate-900">Last Name:</span> {profile.last_name}</p>
                                 <p><span className="font-medium text-slate-900">Contact Email:</span> {profile.contact_email}</p>
                                 <p><span className="font-medium text-slate-900">Phone Number:</span> {profile.phone_number || "—"}</p>
+                                <p><span className="font-medium text-slate-900">Role:</span> {profile.role === "professor" ? "Professor / TA" : "Student"}</p>
                                 <p><span className="font-medium text-slate-900">DSL Status:</span> {profile.dsl_status ? "Yes" : "No"}</p>
                             </div>
                         </section>

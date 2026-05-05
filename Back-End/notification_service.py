@@ -24,6 +24,7 @@ import time
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from typing import Optional
+from pathlib import Path
 
 # Optional: load .env here instead of main startup if you want this file to be self-contained.
 # Make dotenv optional so the program does not crash if the package is missing.
@@ -36,6 +37,10 @@ except ImportError:
         This lets the rest of the program still run.
         """
         pass
+
+# Load .env from the same folder as this file.
+ENV_PATH = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=ENV_PATH)
 
 from Priority_Queue import MeetingRequest
 from queue_db import (
@@ -89,36 +94,39 @@ class EmailNotifier:
         ])
     
     def send_email(self, to_email: str, subject: str, body: str) -> bool:
-        """
-        Sends a basic email
-        Returns True if successful, False otherwise
-        This is used by the background worker when processing queued email jobs.
-        """
+  
+    #   Sends a basic email
+    #   Returns True if successful, False otherwise
+    #   This is used by the background worker when processing queued email jobs.
 
-        # If not configured, skip send
         if not self.is_configured():
             print("Email system is not configured. Skipping email.")
+            print("SMTP_HOST:", self.smtp_host)
+            print("SMTP_USER:", self.smtp_user)
+            print("SMTP_FROM:", self.smtp_from)
             return False
-        
+
         try:
-            # Building email message
+            print(f"Preparing to send email to {to_email} with subject: {subject}")
+
             msg = EmailMessage()
             msg["Subject"] = subject
             msg["From"] = self.smtp_from
             msg["To"] = to_email
             msg.set_content(body)
 
-            # Connect to SMTP sever
             with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
-                server.starttls()           # secure connection (TLS)
-                server.login(self.smtp_user, self.smtp_password)    # Log in using the configured SMTP credentials.
-                server.send_message(msg)                            # Send the message.
+                print("Connected to SMTP server.")
+                server.starttls()
+                print("TLS started.")
+                server.login(self.smtp_user, self.smtp_password)
+                print("SMTP login successful.")
+                server.send_message(msg)
+                print("Email sent successfully.")
 
             return True
-        
+
         except Exception as e:
-             # For now, print the error and return False.
-            # Later this can be logged to a file or retry queue.
             print(f"Email failed: {e}")
             return False
     
@@ -277,6 +285,11 @@ def process_due_email_jobs(notifier: EmailNotifier, limit: int = 10) -> None:
     - scheduled_for is pushed into the future
     - attempt_count increases
     """
+
+    print("Checking for due email jobs...")
+    jobs = get_due_email_jobs(limit=limit)
+    print("Due email jobs found:", len(jobs))
+
     jobs = get_due_email_jobs(limit=limit)
 
     for job in jobs:
@@ -287,11 +300,16 @@ def process_due_email_jobs(notifier: EmailNotifier, limit: int = 10) -> None:
         # scheduled reminder should not fire for a completed/cancelled request.
         if request_id:
             req = get_request_by_id(request_id)
-            if req is None:
-                mark_email_job_sent(job["job_id"])
-                continue
 
-            if req.status != "Waiting" and "Reminder" in job["subject"]:
+            # If the request cannot be found in queue_db, do not silently discard the job.
+            # For the current prototype, some queue actions are still managed in memory,
+            # so we allow the queued email to send using the stored job data.
+            if req is None:
+                req = None
+
+            # Only suppress reminder emails if we were able to find the request
+            # and confirm that it is no longer waiting.
+            if req is not None and req.status != "Waiting" and "Reminder" in job["subject"]:
                 mark_email_job_sent(job["job_id"])
                 continue
 
@@ -317,6 +335,8 @@ def process_due_email_jobs(notifier: EmailNotifier, limit: int = 10) -> None:
                     f"Joined at: {req.formatted_time}\n\n"
                     f"Please be ready when your turn is close.\n"
                 )
+
+        print(f"Attempting to send queued email to {job['recipient']} with subject: {job['subject']}")
 
         # Send email with UPDATED body
         success = notifier.send_email(

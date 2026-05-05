@@ -5,12 +5,14 @@ export default function DashboardPage({ onBack, currentStudent }) {
       counts stores queue totals returned by the backend.
       queue stores the merged list of all currently waiting students.
       nextStudent stores the student who would be served next.
+      sessions stores the current office-hours sessions available for homepage display.
       message stores success or error feedback for dashboard actions.
       loading tracks whether the dashboard is currently fetching backend data.
     */
     const [counts, setCounts] = useState(null);
     const [queue, setQueue] = useState([]);
     const [nextStudent, setNextStudent] = useState(null);
+    const [sessions, setSessions] = useState([]);
     const [message, setMessage] = useState("");
     const [loading, setLoading] = useState(true);
     const [sessionForm, setSessionForm] = useState({
@@ -23,6 +25,14 @@ export default function DashboardPage({ onBack, currentStudent }) {
         description: "",
     });
 
+    /*
+      handleCreateSession allows a professor account to create a new office-hours session.
+
+      After creating the session successfully:
+      - a success message is shown
+      - the form is cleared
+      - the dashboard data is refreshed so the new session appears immediately
+    */
     async function handleCreateSession(event) {
         event.preventDefault();
 
@@ -37,6 +47,7 @@ export default function DashboardPage({ onBack, currentStudent }) {
                 body: JSON.stringify({
                     ...sessionForm,
                     role: currentStudent?.role || "",
+                    created_by: currentStudent?.cwid,
                 }),
             });
 
@@ -64,6 +75,40 @@ export default function DashboardPage({ onBack, currentStudent }) {
         }
     }
 
+    /*
+      handleDeleteSession deletes one office-hours session created by the current professor.
+
+      After deletion succeeds, the dashboard is reloaded so the removed session
+      disappears from the management list immediately.
+    */
+    async function handleDeleteSession(sessionId) {
+        try {
+            setMessage("");
+
+            const response = await fetch("http://127.0.0.1:5000/api/dashboard/delete-office-hours", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    role: currentStudent?.role || "",
+                    session_id: sessionId,
+                    created_by: currentStudent?.cwid,
+                }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "Unable to delete office hours session.");
+            }
+
+            setMessage("Office hours session deleted successfully.");
+            await loadDashboardData();
+        } catch (err) {
+            setMessage(err.message || "Something went wrong while deleting the session.");
+        }
+    }
 
     /*
       If the current signed-in account is not a professor,
@@ -96,6 +141,7 @@ export default function DashboardPage({ onBack, currentStudent }) {
       - queue counts
       - merged queue
       - next student
+      - office-hours sessions for management
 
       The current signed-in account role is sent with each request so the backend
       can verify that only professor accounts are allowed to access dashboard data.
@@ -107,9 +153,10 @@ export default function DashboardPage({ onBack, currentStudent }) {
 
             const requestBody = JSON.stringify({
                 role: currentStudent?.role || "",
+                created_by: currentStudent?.cwid,
             });
 
-            const [countsResponse, queueResponse, nextResponse] = await Promise.all([
+            const [countsResponse, queueResponse, nextResponse, sessionsResponse] = await Promise.all([
                 fetch("http://127.0.0.1:5000/api/dashboard/queue-counts", {
                     method: "POST",
                     headers: {
@@ -131,10 +178,18 @@ export default function DashboardPage({ onBack, currentStudent }) {
                     },
                     body: requestBody,
                 }),
+                fetch("http://127.0.0.1:5000/api/dashboard/office-hours", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: requestBody,
+                }),
             ]);
 
             const countsData = await countsResponse.json();
             const queueData = await queueResponse.json();
+            const sessionsData = await sessionsResponse.json();
 
             let nextData = null;
             if (nextResponse.ok) {
@@ -143,10 +198,6 @@ export default function DashboardPage({ onBack, currentStudent }) {
                 nextData = null;
             }
 
-            /*
-              If either the counts request or queue request fails,
-              show the backend error message if available.
-            */
             if (!countsResponse.ok) {
                 throw new Error(countsData.error || "Failed to load queue counts.");
             }
@@ -155,9 +206,14 @@ export default function DashboardPage({ onBack, currentStudent }) {
                 throw new Error(queueData.error || "Failed to load queue data.");
             }
 
+            if (!sessionsResponse.ok) {
+                throw new Error(sessionsData.error || "Failed to load office hours sessions.");
+            }
+
             setCounts(countsData);
             setQueue(queueData);
             setNextStudent(nextData);
+            setSessions(sessionsData);
         } catch (err) {
             setMessage(err.message || "Failed to load dashboard data.");
         } finally {
@@ -238,7 +294,7 @@ export default function DashboardPage({ onBack, currentStudent }) {
                         <div>
                             <h2 className="text-3xl font-bold tracking-tight text-slate-900">Professor / TA Dashboard</h2>
                             <p className="mt-2 text-sm text-slate-500">
-                                View queue activity, see who is next, and serve students in order.
+                                View queue activity, create sessions, manage sessions, and serve students in order.
                             </p>
                         </div>
 
@@ -259,8 +315,7 @@ export default function DashboardPage({ onBack, currentStudent }) {
                     {loading ? (
                         <p className="text-sm text-slate-500">Loading dashboard...</p>
                     ) : (
-
-                        <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+                        <>
                             <section className="mb-6 rounded-3xl bg-white p-6 shadow-sm">
                                 <h3 className="text-xl font-semibold text-slate-900">Create Office Hours Session</h3>
                                 <p className="mt-1 text-sm text-slate-500">
@@ -321,7 +376,7 @@ export default function DashboardPage({ onBack, currentStudent }) {
                                         placeholder="Description"
                                         value={sessionForm.description}
                                         onChange={(e) => setSessionForm({ ...sessionForm, description: e.target.value })}
-                                        className="md:col-span-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                                        className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500 md:col-span-2"
                                         rows={3}
                                     />
 
@@ -335,92 +390,139 @@ export default function DashboardPage({ onBack, currentStudent }) {
                                     </div>
                                 </form>
                             </section>
-                            <div className="space-y-6">
-                                <section className="rounded-3xl bg-white p-6 shadow-sm">
-                                    <h3 className="text-xl font-semibold text-slate-900">Queue Counts</h3>
 
-                                    {counts && (
-                                        <div className="mt-4 space-y-3 text-sm text-slate-600">
-                                            <p><span className="font-medium text-slate-900">DSL Queue:</span> {counts.DSL}</p>
-                                            <p><span className="font-medium text-slate-900">Non-DSL Queue:</span> {counts["Non-DSL"]}</p>
-                                            <p><span className="font-medium text-slate-900">Total:</span> {counts.Total}</p>
-                                        </div>
-                                    )}
-                                </section>
+                            <section className="mb-6 rounded-3xl bg-white p-6 shadow-sm">
+                                <h3 className="text-xl font-semibold text-slate-900">Manage Office Hours Sessions</h3>
+                                <p className="mt-1 text-sm text-slate-500">
+                                    Review your current sessions and remove any session you no longer want displayed.
+                                </p>
 
-                                <section className="rounded-3xl bg-white p-6 shadow-sm">
-                                    <h3 className="text-xl font-semibold text-slate-900">Next Student</h3>
-
-                                    <div className="mt-4 space-y-3 text-sm text-slate-600">
-                                        {!nextStudent && (
-                                            <p>No students are currently waiting.</p>
-                                        )}
-
-                                        {nextStudent && (
-                                            <>
-                                                <p><span className="font-medium text-slate-900">Name:</span> {nextStudent.student_name}</p>
-                                                <p><span className="font-medium text-slate-900">Student ID:</span> {nextStudent.student_id}</p>
-                                                <p><span className="font-medium text-slate-900">Topic:</span> {nextStudent.title}</p>
-                                                <p><span className="font-medium text-slate-900">Joined At:</span> {nextStudent.joined_at}</p>
-                                            </>
-                                        )}
-
-                                        <div className="pt-2">
-                                            <button
-                                                onClick={handleServeNext}
-                                                className="rounded-2xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                                            >
-                                                Serve Next Student
-                                            </button>
-                                        </div>
-                                    </div>
-                                </section>
-                            </div>
-
-                            <section className="rounded-3xl bg-white p-6 shadow-sm">
-                                <div className="mb-5 flex items-center justify-between">
-                                    <div>
-                                        <h3 className="text-xl font-semibold text-slate-900">Current Queue</h3>
-                                        <p className="mt-1 text-sm text-slate-500">
-                                            Students are shown in the same order they would be served.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-4">
-                                    {queue.length === 0 && (
-                                        <p className="text-sm text-slate-500">No students are currently waiting.</p>
+                                <div className="mt-5 space-y-4">
+                                    {sessions.length === 0 && (
+                                        <p className="text-sm text-slate-500">No office hours sessions are currently available.</p>
                                     )}
 
-                                    {queue.map((student, index) => (
+                                    {sessions.map((session) => (
                                         <div
-                                            key={student.request_id}
+                                            key={session.id}
                                             className="rounded-3xl border border-slate-200 p-5"
                                         >
-                                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                                                 <div>
                                                     <h4 className="text-lg font-semibold text-slate-900">
-                                                        {index + 1}. {student.student_name}
+                                                        {session.name}
                                                     </h4>
                                                     <p className="text-sm text-slate-500">
-                                                        {student.student_id} • {student.title}
+                                                        {session.role} • {session.subtitle}
                                                     </p>
+                                                    <div className="mt-3 space-y-2 text-sm text-slate-600">
+                                                        <p><span className="font-medium text-slate-900">Time:</span> {session.time}</p>
+                                                        <p><span className="font-medium text-slate-900">Location:</span> {session.location}</p>
+                                                        <p><span className="font-medium text-slate-900">Meeting Type:</span> {session.meetingType}</p>
+                                                        <p><span className="font-medium text-slate-900">Details:</span> {session.description}</p>
+                                                    </div>
                                                 </div>
 
-                                                <div className="flex flex-wrap items-center gap-3">
-                                                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                                                        {student.is_dsl_queue ? "DSL" : "Non-DSL"}
-                                                    </span>
-                                                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                                                        Joined: {student.joined_at}
-                                                    </span>
-                                                </div>
+                                                <button
+                                                    onClick={() => handleDeleteSession(session.id)}
+                                                    className="rounded-2xl border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                                                >
+                                                    Delete Session
+                                                </button>
                                             </div>
                                         </div>
                                     ))}
                                 </div>
                             </section>
-                        </section>
+
+                            <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+                                <div className="space-y-6">
+                                    <section className="rounded-3xl bg-white p-6 shadow-sm">
+                                        <h3 className="text-xl font-semibold text-slate-900">Queue Counts</h3>
+
+                                        {counts && (
+                                            <div className="mt-4 space-y-3 text-sm text-slate-600">
+                                                <p><span className="font-medium text-slate-900">DSL Queue:</span> {counts.DSL}</p>
+                                                <p><span className="font-medium text-slate-900">Non-DSL Queue:</span> {counts["Non-DSL"]}</p>
+                                                <p><span className="font-medium text-slate-900">Total:</span> {counts.Total}</p>
+                                            </div>
+                                        )}
+                                    </section>
+
+                                    <section className="rounded-3xl bg-white p-6 shadow-sm">
+                                        <h3 className="text-xl font-semibold text-slate-900">Next Student</h3>
+
+                                        <div className="mt-4 space-y-3 text-sm text-slate-600">
+                                            {!nextStudent && (
+                                                <p>No students are currently waiting.</p>
+                                            )}
+
+                                            {nextStudent && (
+                                                <>
+                                                    <p><span className="font-medium text-slate-900">Name:</span> {nextStudent.student_name}</p>
+                                                    <p><span className="font-medium text-slate-900">Student ID:</span> {nextStudent.student_id}</p>
+                                                    <p><span className="font-medium text-slate-900">Topic:</span> {nextStudent.title}</p>
+                                                    <p><span className="font-medium text-slate-900">Joined At:</span> {nextStudent.joined_at}</p>
+                                                </>
+                                            )}
+
+                                            <div className="pt-2">
+                                                <button
+                                                    onClick={handleServeNext}
+                                                    className="rounded-2xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                                                >
+                                                    Serve Next Student
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </section>
+                                </div>
+
+                                <section className="rounded-3xl bg-white p-6 shadow-sm">
+                                    <div className="mb-5 flex items-center justify-between">
+                                        <div>
+                                            <h3 className="text-xl font-semibold text-slate-900">Current Queue</h3>
+                                            <p className="mt-1 text-sm text-slate-500">
+                                                Students are shown in the same order they would be served.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        {queue.length === 0 && (
+                                            <p className="text-sm text-slate-500">No students are currently waiting.</p>
+                                        )}
+
+                                        {queue.map((student, index) => (
+                                            <div
+                                                key={student.request_id}
+                                                className="rounded-3xl border border-slate-200 p-5"
+                                            >
+                                                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                                    <div>
+                                                        <h4 className="text-lg font-semibold text-slate-900">
+                                                            {index + 1}. {student.student_name}
+                                                        </h4>
+                                                        <p className="text-sm text-slate-500">
+                                                            {student.student_id} • {student.title}
+                                                        </p>
+                                                    </div>
+
+                                                    <div className="flex flex-wrap items-center gap-3">
+                                                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                                                            {student.is_dsl_queue ? "DSL" : "Non-DSL"}
+                                                        </span>
+                                                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                                                            Joined: {student.joined_at}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </section>
+                            </section>
+                        </>
                     )}
                 </main>
             </div>

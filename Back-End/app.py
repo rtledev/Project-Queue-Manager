@@ -14,8 +14,11 @@ from flask_cors import CORS
 # AlreadyWaitingError -> custom error if a student is already in queue
 from Priority_Queue import MeetingQueueManager, MeetingRequest, AlreadyWaitingError
 
-# estimated time per person
-from wait_time_estimator import build_wait_time_estimates
+
+from notification_service import EmailNotifier, start_email_worker
+
+from queue_db import initialize_queue_storage
+
 
 # Initialize the student database schema needed for account creation/login
 from student_db import (
@@ -44,6 +47,13 @@ qm = MeetingQueueManager()
 from seed_student import seed_dummy_students
 initialize_student_db()
 seed_dummy_students()
+initialize_queue_storage()
+
+# Create the email notifier service.
+notifier = EmailNotifier()
+
+# Start the background worker that processes queued email jobs.
+start_email_worker(notifier)
 
 # Temporary mock data for office hours sessions.
 # Right now this is hardcoded.
@@ -72,7 +82,7 @@ OFFICE_HOURS = [
         "description": "Best for implementation questions, debugging, and lab assignment support."
     }
 ]
-
+# Dashboard helper function
 def dashboard_access_allowed(request_data) -> bool:
     """
     Checks whether the provided request payload belongs to a professor account.
@@ -84,6 +94,17 @@ def dashboard_access_allowed(request_data) -> bool:
 
     return str(request_data.get("role", "")).strip().lower() == "professor"
 
+# Helper function for email functionality
+def check_near_front_notifications():
+    """
+    Looks at all waiting requests and queues near-front emails
+    for students who have reached positions 1 through 3.
+    """
+    merged = qm.merged_queue()
+
+    for index, req in enumerate(merged, start=1):
+        if index <= 3 and req.notification_ok and not getattr(req, "near_front_notified", False):
+            notifier.queue_near_front_notification(req, index)
 
 # -------------------------------
 # GET: /api/office-hours
@@ -119,6 +140,54 @@ def get_office_hours():
 
     # Return the list as a JSON response.
     return jsonify(data)
+
+# -------------------------------
+# POST: /api/dashboard/office-hours
+# -------------------------------
+# This endpoint returns a list of available office hours sessions
+# and sends it to the professors dashboard for management.
+@app.post("/api/dashboard/office-hours")
+def dashboard_office_hours():
+    data = request.get_json()
+
+    if not dashboard_access_allowed(data):
+        return jsonify({"error": "Professor access required."}), 403
+
+    created_by = data.get("created_by")
+
+    sessions = []
+    for session in OFFICE_HOURS:
+        if session.get("created_by") == created_by:
+            sessions.append(session)
+
+    return jsonify(sessions), 200
+
+# ------------------------------------------- 
+# DELETE: /api/dashboard/delete-office-hours
+# -------------------------------------------
+# This endpoint deletes the specified office hours session.
+@app.post("/api/dashboard/delete-office-hours")
+def delete_office_hours():
+    data = request.get_json()
+
+    if not dashboard_access_allowed(data):
+        return jsonify({"error": "Professor access required."}), 403
+
+    session_id = data.get("session_id")
+    created_by = data.get("created_by")
+
+    if session_id is None:
+        return jsonify({"error": "Missing required field: session_id"}), 400
+
+    for i, session in enumerate(OFFICE_HOURS):
+        if session.get("id") == session_id and session.get("created_by") == created_by:
+            deleted_session = OFFICE_HOURS.pop(i)
+            return jsonify({
+                "message": "Office hours session deleted successfully.",
+                "session": deleted_session
+            }), 200
+
+    return jsonify({"error": "Session not found or not owned by this professor."}), 404
 
 # -------------------------------
 # POST: /api/auth/signup
@@ -283,6 +352,7 @@ def update_profile():
         "contact_email",
         "phone_number",
         "dsl_status",
+        "role",
     ]
 
     for field in required_fields:
@@ -303,6 +373,7 @@ def update_profile():
         contact_email=str(data["contact_email"]).strip(),
         phone_number=str(data["phone_number"]).strip(),
         dsl_status=bool(data["dsl_status"]),
+        role=str(data.get("role", "student")).strip().lower(),
     )
 
     if not updated:
@@ -349,6 +420,7 @@ def create_office_hours():
         "location": str(data["location"]).strip(),
         "meetingType": str(data["meetingType"]).strip(),
         "description": str(data["description"]).strip(),
+        "created_by": data.get("created_by"),
     }
 
     OFFICE_HOURS.append(new_session)
@@ -400,20 +472,30 @@ def join_queue():
         # If student is already in queue, return 409 Conflict error.
         return jsonify({"error": "Student already has an active request."}), 409
 
-    merged = qm.merged_queue()
+    
+    # Get the student's current queue position after joining.
+    position = qm.get_position(str(data["student_id"]))
 
-    estimates = build_wait_time_estimates(merged)
+    if request_obj.notification_ok:
+        print("Attempting to queue join confirmation email...")
+        result = notifier.queue_join_confirmation(request_obj, position)
+        print("queue_join_confirmation result:", result)
 
-    estimated_wait = estimates.get(request_obj.request_id, 0)
+    if request_obj.notification_ok:
+        print("Attempting to queue reminder email...")
+        reminder_result = notifier.queue_waiting_reminder(request_obj, delay_minutes=10)
+        print("queue_waiting_reminder result:", reminder_result)
+
+    # After the queue changes, check whether anyone is now near the front.
+    check_near_front_notifications()
+
     # If successful, return confirmation data.
     return jsonify({
         "message": "Joined queue successfully.",
-        "request_id": request_obj.request_id,   # unique ID for this request
-        "position": qm.get_position(str(data["student_id"])),  # current queue position
-        "joined_at": request_obj.formatted_time,  # timestamp of join
-        "estimated_wait_minutes": estimated_wait,   # estimated time until next service 2+
-        "estimated_service_minutes": request_obj.estimated_service_minutes, # estimated time until next service for first person
-    }), 201  # 201 = Created
+        "request_id": request_obj.request_id,
+        "position": position,
+        "joined_at": request_obj.formatted_time
+}), 201 # 201 = Created
 
 
 # -------------------------------
@@ -441,6 +523,9 @@ def cancel_queue():
     # If the queue manager returns False, the student was not actively waiting.
     if not success:
         return jsonify({"error": "No active request found for this student."}), 404
+
+    # After the queue changes, check whetehr anyone is now near the front,
+    check_near_front_notifications()
 
     # If cancellation succeeds, return a confirmation response.
     return jsonify({
@@ -471,7 +556,7 @@ def get_position(student_id):
 
 
 # -------------------------------
-# GET: /api/dashboard/queue-counts
+# POST: /api/dashboard/queue-counts
 # -------------------------------
 # This endpoint returns the current queue counts for dashboard display.
 @app.post("/api/dashboard/queue-counts")
@@ -484,7 +569,7 @@ def dashboard_queue_counts():
     return jsonify(qm.queue_counts())
 
 # -------------------------------
-# GET: /api/dashboard/queue
+# POST: /api/dashboard/queue
 # -------------------------------
 # This endpoint returns the current merged queue in service order.
 @app.post("/api/dashboard/queue")
@@ -513,7 +598,7 @@ def dashboard_queue():
 
 
 # -------------------------------
-# GET: /api/dashboard/next-student
+# POST: /api/dashboard/next-student
 # -------------------------------
 # This endpoint returns the next student who would be served.
 @app.post("/api/dashboard/next-student")
@@ -555,6 +640,12 @@ def dashboard_serve_next():
     if served_request is None:
         return jsonify({"error": "No students are currently waiting."}), 404
 
+    # Queue a now-serving email for the student if notifications are allowed.
+    if served_request.notification_ok:
+        notifier.queue_now_serving_email(served_request)
+
+
+
     return jsonify({
         "message": "Next student served successfully.",
         "request_id": served_request.request_id,
@@ -566,6 +657,8 @@ def dashboard_serve_next():
         "status": served_request.status,
         "joined_at": served_request.formatted_time,
     }), 200
+
+
 
 # -------------------------------
 # Entry point
