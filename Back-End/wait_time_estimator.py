@@ -16,16 +16,20 @@ MIN_MINUTES_PER_PERSON = 7
 MAX_MINUTES_PER_PERSON = 12
 
 def build_wait_time_estimates( merged_queue: List[MeetingRequest]) -> Dict[str, int]:
-        # Builds an estimated wait time for every student in the queue
-        # Returns a dict of requested_id -> estimated info
+    # Builds an estimated wait time for every student in the queue
+    # Returns a dict of requested_id -> estimated info
 
-        estimates = {}
+    estimates = {}
 
-        cumulative_minutes = 0
+    cumulative_minutes = 0
 
-        for req in merged_queue:
-            cumulative_minutes += req.estimated_service_minutes
+    for req in merged_queue:
+        service_minutes = req.estimated_service_minutes
 
-            estimates[req.request_id] = cumulative_minutes
+        if service_minutes <= 0:
+            service_minutes = 10
 
-        return estimates
+        cumulative_minutes += service_minutes
+        estimates[req.request_id] = cumulative_minutes
+
+    return estimates

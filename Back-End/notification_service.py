@@ -43,6 +43,7 @@ ENV_PATH = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
 from Priority_Queue import MeetingRequest
+from wait_time_estimator import build_wait_time_estimates
 from queue_db import (
     queue_email_job,
     get_due_email_jobs,
@@ -80,6 +81,7 @@ class EmailNotifier:
         self.smtp_password = os.getenv("SMTP_PASSWORD", "")
         self.smtp_from = os.getenv("SMTP_FROM", self.smtp_user)
 
+    
 
     def is_configured(self) -> bool:
         """
@@ -158,26 +160,53 @@ class EmailNotifier:
                 return index
 
         return None
+    
+    def get_current_estimated_wait_from_db(self, request_id: str) -> Optional[int]:
+        """
+        Recalculates the student's current estimated wait time from the database.
+        """
+        req = get_request_by_id(request_id)
+
+        if req is None or req.status != "Waiting":
+            return None
+
+        waiting_requests = get_waiting_requests(
+            queue_id=req.queue_id,
+            session_id=req.session_id,
+        )
+
+        merged = (
+            [r for r in waiting_requests if r.is_dsl_queue]
+            + [r for r in waiting_requests if not r.is_dsl_queue]
+        )
+
+        estimates = build_wait_time_estimates(merged)
+
+        return estimates.get(request_id)
 
 # -------------Email templates → queued jobs-------------------
 
 
-    def queue_join_confirmation(self, req: MeetingRequest, position: int) -> bool:
-        """
-        Email sent when student joins queue.
-        Queues a join-confirmation email to be sent soon.
-        """
+    def queue_join_confirmation(self, req: MeetingRequest, position: int, estimated_minutes: int = None) -> bool:
         subject = "Ps & Qs - Queue Confirmation"
 
+        estimate_line = ""
+        if estimated_minutes is not None:
+            estimate_line = f"Estimated wait time: about {estimated_minutes} minutes\n"
+
         body = (
-            f"Hello {req.student_name},\n"
-            f"~~~~~~~~~~~~~~~~~~~~~"
-            f"You are now in the queue.\n"
+            f"Hello {req.student_name},\n\n"
+            f"====================================\n"
+            f"Ps & Qs Queue Confirmation\n"
+            f"====================================\n\n"
+            f"You have successfully joined the queue.\n\n"
             f"Position: {position}\n"
+            f"{estimate_line}"
             f"Joined at: {req.formatted_time}\n"
-            f"Topic: {req.title}\n"
-            f"~~~~~~~~~~~~~~~~~~~~~"
-            f"Please wait for your turn."
+            f"Topic: {req.title}\n\n"
+            f"This is only an estimate and may change depending on each meeting.\n\n"
+            f"Thank you,\n"
+            f"Ps & Qs Meeting Queue Manager\n"
         )
 
         return queue_email_job(
@@ -323,8 +352,23 @@ def process_due_email_jobs(notifier: EmailNotifier, limit: int = 10) -> None:
         ):
             req = get_request_by_id(request_id)
             position = notifier.get_current_position_from_db(request_id)
+            estimated_wait = notifier.get_current_estimated_wait_from_db(request_id)
 
             if req is not None and position is not None:
+                estimate_line = ""
+
+                if estimated_wait is not None:
+                    if position == 1:
+                        estimate_line = (
+                            f"Estimated time: about {estimated_wait} minutes.\n"
+                            f"You are next, so please be ready.\n"
+                        )
+                    else:
+                        estimate_line = (
+                            f"Estimated wait time: about {estimated_wait} minutes.\n"
+                            f"This may be shorter or longer depending on each meeting.\n"
+                        )
+
                 body = (
                     f"Hello {req.student_name},\n\n"
                     f"==============================\n"
@@ -332,8 +376,11 @@ def process_due_email_jobs(notifier: EmailNotifier, limit: int = 10) -> None:
                     f"==============================\n\n"
                     f"Topic: {req.title}\n"
                     f"Current Position: {position}\n"
+                    f"{estimate_line}"
                     f"Joined at: {req.formatted_time}\n\n"
-                    f"Please be ready when your turn is close.\n"
+                    f"Please be ready when your turn is close.\n\n"
+                    f"Thank you,\n"
+                    f"Ps & Qs Meeting Queue Manager\n"
                 )
 
         print(f"Attempting to send queued email to {job['recipient']} with subject: {job['subject']}")
@@ -353,35 +400,6 @@ def process_due_email_jobs(notifier: EmailNotifier, limit: int = 10) -> None:
                 error_message="SMTP send failed",
                 retry_delay_seconds=60,
             )
-def queue_join_confirmation(self, req: MeetingRequest, position: int, estimated_minutes: int = None) -> bool:
-    subject = "Ps & Qs - Queue Confirmation"
-
-    estimate_line = ""
-    if estimated_minutes is not None:
-        estimate_line = f"Estimated wait time: about {estimated_minutes} minutes\n"
-
-    body = (
-        f"Hello {req.student_name},\n\n"
-        f"====================================\n"
-        f"Ps & Qs Queue Confirmation\n"
-        f"====================================\n\n"
-        f"You have successfully joined the queue.\n\n"
-        f"Position: {position}\n"
-        f"{estimate_line}"
-        f"Joined at: {req.formatted_time}\n"
-        f"Topic: {req.title}\n\n"
-        f"This is only an estimate and may change depending on each meeting.\n\n"
-        f"Thank you,\n"
-        f"Ps & Qs Meeting Queue Manager\n"
-    )
-
-    return queue_email_job(
-        recipient=req.email,
-        subject=subject,
-        body=body,
-        request_id=req.request_id,
-        scheduled_for=datetime.now(),
-    )
 
 def _email_worker_loop(notifier: EmailNotifier, poll_seconds: int) -> None:
     """

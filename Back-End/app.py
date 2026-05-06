@@ -14,10 +14,13 @@ from flask_cors import CORS
 # AlreadyWaitingError -> custom error if a student is already in queue
 from Priority_Queue import MeetingQueueManager, MeetingRequest, AlreadyWaitingError
 
+from wait_time_estimator import build_wait_time_estimates
 
 from notification_service import EmailNotifier, start_email_worker
 
 from queue_db import initialize_queue_storage
+
+from datetime import datetime, timedelta
 
 
 # Initialize the student database schema needed for account creation/login
@@ -48,6 +51,8 @@ from seed_student import seed_dummy_students
 initialize_student_db()
 seed_dummy_students()
 initialize_queue_storage()
+
+qm = MeetingQueueManager()
 
 # Create the email notifier service.
 notifier = EmailNotifier()
@@ -99,12 +104,34 @@ def check_near_front_notifications():
     """
     Looks at all waiting requests and queues near-front emails
     for students who have reached positions 1 through 3.
+
+    Prevents duplicate emails from being sent repeatedly
+    within a short cooldown window.
     """
+
     merged = qm.merged_queue()
 
     for index, req in enumerate(merged, start=1):
-        if index <= 3 and req.notification_ok and not getattr(req, "near_front_notified", False):
+
+        # Only notify students near the front
+        if index <= 3 and req.notification_ok:
+            now = datetime.now()
+
+            # Check whether a near-front email was recently sent
+            last_sent = getattr(req, "last_near_front_email_time", None)
+
+            if last_sent is not None:
+                cooldown = timedelta(minutes=1)
+
+                # Skip if still inside cooldown window
+                if now - last_sent < cooldown:
+                    continue
+
+            # Queue the email
             notifier.queue_near_front_notification(req, index)
+
+            # Save timestamp of this notification
+            req.last_near_front_email_time = now
 
 # -------------------------------
 # GET: /api/office-hours
@@ -476,10 +503,16 @@ def join_queue():
     # Get the student's current queue position after joining.
     position = qm.get_position(str(data["student_id"]))
 
+    merged = qm.merged_queue()
+    estimates = build_wait_time_estimates(merged)
+    estimated_minutes = estimates.get(request_obj.request_id)
+
     if request_obj.notification_ok:
-        print("Attempting to queue join confirmation email...")
-        result = notifier.queue_join_confirmation(request_obj, position)
-        print("queue_join_confirmation result:", result)
+        notifier.queue_join_confirmation(
+        request_obj,
+        position,
+        estimated_minutes
+    )
 
     if request_obj.notification_ok:
         print("Attempting to queue reminder email...")
@@ -494,7 +527,8 @@ def join_queue():
         "message": "Joined queue successfully.",
         "request_id": request_obj.request_id,
         "position": position,
-        "joined_at": request_obj.formatted_time
+        "joined_at": request_obj.formatted_time,
+        "estimated_wait_minutes": estimated_minutes
 }), 201 # 201 = Created
 
 
@@ -671,4 +705,4 @@ if __name__ == "__main__":
     # debug=True enables:
     # - auto-reload when code changes
     # - detailed error messages in browser
-    app.run(debug=True)
+    app.run(debug=True, use_reloader=False)
