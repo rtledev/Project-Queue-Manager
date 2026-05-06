@@ -121,7 +121,7 @@ def check_near_front_notifications():
             last_sent = getattr(req, "last_near_front_email_time", None)
 
             if last_sent is not None:
-                cooldown = timedelta(minutes=1)
+                cooldown = timedelta(seconds=10)
 
                 # Skip if still inside cooldown window
                 if now - last_sent < cooldown:
